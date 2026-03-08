@@ -16,10 +16,10 @@ export default function HomePage() {
           </a>
           
           <a
-            href="/enhanced-dashboard"
+            href="/dashboard"
             className="block w-full py-2 px-4 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
           >
-            Enhanced OIDC Dashboard
+            Go to Dashboard
           </a>
           
           <div className="border-t pt-4">

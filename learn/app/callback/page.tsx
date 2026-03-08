@@ -12,7 +12,7 @@ export default function CallbackPage() {
     // The react-oidc-context automatically handles the callback
     // We just need to check if the user is authenticated and redirect
     if (auth.isAuthenticated) {
-      router.push('/enhanced-dashboard');
+      router.push('/dashboard');
     } else if (!auth.isLoading && auth.error) {
       console.error('Authentication callback error:', auth.error);
       router.push('/signin');
