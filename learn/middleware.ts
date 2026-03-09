@@ -1,38 +1,86 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  const publicPaths = ['/signin', '/signup', '/forgot-password', '/reset-password', '/callback'];
+  const publicPaths = ['/signin', '/signup', '/'];
 
   // Allow API routes to be accessed
-  if (pathname.startsWith('/api')) {
+  if (pathname.startsWith('/api') || pathname.startsWith('/_next') || pathname.startsWith('/favicon')) {
     return NextResponse.next();
   }
 
-  const cookieStore = await cookies();
-  const accessToken = cookieStore.get('accessToken')?.value;
-  const idToken = cookieStore.get('idToken')?.value;
-  
-  // Simple token check - just verify tokens exist (without jwt-decode)
-  const isAuthenticated = !!(accessToken && idToken);
+  // Create a Supabase client for the server
+  let response = NextResponse.next({
+    request: {
+      headers: request.headers,
+    },
+  });
 
-  if (isAuthenticated) {
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) {
+          return request.cookies.get(name)?.value;
+        },
+        set(name: string, value: string, options: any) {
+          request.cookies.set({
+            name,
+            value,
+            ...options,
+          });
+          response = NextResponse.next({
+            request: {
+              headers: request.headers,
+            },
+          });
+          response.cookies.set({
+            name,
+            value,
+            ...options,
+          });
+        },
+        remove(name: string, options: any) {
+          request.cookies.set({
+            name,
+            value: '',
+            ...options,
+          });
+          response = NextResponse.next({
+            request: {
+              headers: request.headers,
+            },
+          });
+          response.cookies.set({
+            name,
+            value: '',
+            ...options,
+          });
+        },
+      },
+    }
+  );
+
+  const { data: { user } } = await supabase.auth.getUser();
+
+  if (user) {
     // If authenticated, redirect from public auth pages to dashboard
-    if (publicPaths.includes(pathname)) {
+    if (publicPaths.includes(pathname) && pathname !== '/') {
       return NextResponse.redirect(new URL('/dashboard', request.url));
     }
   } else {
     // If not authenticated, allow access to public pages
-    if (publicPaths.includes(pathname) || pathname === '/') {
-      return NextResponse.next();
+    if (publicPaths.includes(pathname)) {
+      return response;
     }
     // For any other protected route, redirect to sign-in
     return NextResponse.redirect(new URL('/signin', request.url));
   }
 
-  return NextResponse.next();
+  return response;
 }
 
 export const config = {

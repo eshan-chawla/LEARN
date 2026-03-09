@@ -1,4 +1,4 @@
-import { OIDCAuthProvider } from '@/contexts/OIDCAuthContext';
+import { AuthProvider } from '@/contexts/AuthContext';
 import './globals.css';
 
 export default function RootLayout({
@@ -10,13 +10,13 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-        <title>Learn</title>
-        <meta name="description" content="Learning application with OIDC authentication" />
+        <title>Learn - Learning Aid Platform</title>
+        <meta name="description" content="Learning application with study materials management" />
       </head>
       <body>
-        <OIDCAuthProvider>
+        <AuthProvider>
           {children}
-        </OIDCAuthProvider>
+        </AuthProvider>
       </body>
     </html>
   );

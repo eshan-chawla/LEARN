@@ -1,22 +1,15 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-
-interface User {
-  email: string;
-  sub: string;
-  given_name?: string;
-  family_name?: string;
-}
+import { User } from '@supabase/supabase-js';
+import { getCurrentUser, onAuthStateChange, signIn as authSignIn, signOut as authSignOut, signUp as authSignUp } from '@/lib/auth';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signUp: (email: string, password: string, givenName?: string, familyName?: string) => Promise<{ success: boolean; error?: string }>;
-  confirmSignUp: (email: string, code: string) => Promise<{ success: boolean; error?: string }>;
+  signUp: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
-  checkAuth: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -25,106 +18,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const checkAuth = async () => {
-    try {
-      const response = await fetch('/api/auth/me');
-      if (response.ok) {
-        const data = await response.json();
-        if (data.user) {
-          setUser(data.user);
-        }
-      }
-    } catch (error) {
-      console.error('Auth check error:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    checkAuth();
+    // Check active session
+    getCurrentUser().then((user) => {
+      setUser(user);
+      setLoading(false);
+    });
+
+    // Listen for auth changes
+    const subscription = onAuthStateChange((user) => {
+      setUser(user);
+      setLoading(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    try {
-      const response = await fetch('/api/auth/signin', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password }),
-      });
+    const { data, error } = await authSignIn(email, password);
 
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        // User will be set by the cookie-based auth check
-        await checkAuth();
-        return { success: true };
-      } else {
-        return { success: false, error: data.error || 'Sign in failed' };
-      }
-    } catch (error) {
-      console.error('Sign in error:', error);
-      return { success: false, error: 'Network error' };
+    if (error) {
+      return { success: false, error };
     }
+
+    setUser(data?.user || null);
+    return { success: true };
   };
 
-  const signUp = async (email: string, password: string, givenName?: string, familyName?: string) => {
-    try {
-      const response = await fetch('/api/auth/signup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, password, givenName, familyName }),
-      });
+  const signUp = async (email: string, password: string, name?: string) => {
+    const { data, error } = await authSignUp(email, password, name);
 
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        return { success: true };
-      } else {
-        return { success: false, error: data.error || 'Sign up failed' };
-      }
-    } catch (error) {
-      console.error('Sign up error:', error);
-      return { success: false, error: 'Network error' };
+    if (error) {
+      return { success: false, error };
     }
-  };
 
-  const confirmSignUp = async (email: string, code: string) => {
-    try {
-      const response = await fetch('/api/auth/confirm-signup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ email, code }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        return { success: true };
-      } else {
-        return { success: false, error: data.error || 'Confirmation failed' };
-      }
-    } catch (error) {
-      console.error('Confirm sign up error:', error);
-      return { success: false, error: 'Network error' };
-    }
+    return { success: true };
   };
 
   const signOut = async () => {
-    try {
-      await fetch('/api/auth/signout', {
-        method: 'POST',
-      });
-      setUser(null);
-    } catch (error) {
-      console.error('Sign out error:', error);
-    }
+    await authSignOut();
+    setUser(null);
   };
 
   return (
@@ -134,9 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         signIn,
         signUp,
-        confirmSignUp,
         signOut,
-        checkAuth,
       }}
     >
       {children}
