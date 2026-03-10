@@ -37,6 +37,7 @@ interface Book {
   class_id: string;
   title: string;
   pdf_url: string;
+  file_size: number | null;
   processing_status: 'pending' | 'processing' | 'completed' | 'failed';
   storage_path: string | null;
   uploaded_at: string;
@@ -50,6 +51,62 @@ interface Note {
 }
 
 type TabType = 'recordings' | 'books' | 'notes';
+
+const recordingStatusStyles: Record<Recording['processing_status'], { label: string; className: string; icon: JSX.Element }> = {
+  pending: {
+    label: 'Queued',
+    className: 'bg-gray-100 text-gray-700',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+    ),
+  },
+  processing: {
+    label: 'Processing',
+    className: 'bg-blue-100 text-blue-700',
+    icon: (
+      <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+      </svg>
+    ),
+  },
+  completed: {
+    label: 'Ready',
+    className: 'bg-green-100 text-green-700',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+      </svg>
+    ),
+  },
+  failed: {
+    label: 'Failed',
+    className: 'bg-red-100 text-red-700',
+    icon: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    ),
+  },
+};
+
+function formatFileSize(bytes: number | null) {
+  if (!bytes || bytes <= 0) return '—';
+
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+
+  const decimals = unitIndex === 0 ? 0 : size >= 10 ? 1 : 2;
+  return `${size.toFixed(decimals)} ${units[unitIndex]}`;
+}
 
 export default function ClassPage() {
   const auth = useAuth();
@@ -453,6 +510,9 @@ export default function ClassPage() {
                               Title
                             </th>
                             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Status
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                               Duration
                             </th>
                             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -468,6 +528,14 @@ export default function ClassPage() {
                             <tr key={recording.id} className="hover:bg-gray-50">
                               <td className="px-4 py-4 text-sm font-medium text-gray-900">
                                 {recording.title}
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-600">
+                                <span
+                                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${recordingStatusStyles[recording.processing_status].className}`}
+                                >
+                                  {recordingStatusStyles[recording.processing_status].icon}
+                                  {recordingStatusStyles[recording.processing_status].label}
+                                </span>
                               </td>
                               <td className="px-4 py-4 text-sm text-gray-600">
                                 {recording.duration
@@ -532,6 +600,9 @@ export default function ClassPage() {
                               Status
                             </th>
                             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Size
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
                               Uploaded
                             </th>
                             <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -555,6 +626,9 @@ export default function ClassPage() {
                                     ));
                                   }}
                                 />
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-600">
+                                {formatFileSize(book.file_size)}
                               </td>
                               <td className="px-4 py-4 text-sm text-gray-600">
                                 {formatDate(book.uploaded_at)}
