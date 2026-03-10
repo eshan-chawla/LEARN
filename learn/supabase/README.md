@@ -9,10 +9,6 @@ Run these SQL scripts in order in your **Supabase Dashboard → SQL Editor**:
 | 0 | `00_DELETE_EVERYTHING.sql` | ⚠️ Optional — wipes all tables for a clean reset |
 | 1 | `01_SETUP_EVERYTHING.sql` | ✅ Required — all tables, indexes, RLS policies |
 
-That's it. Both videos **and** PDFs are stored in **AWS S3** — no Supabase Storage setup required.
-
-> `02_SETUP_STORAGE.sql` is kept for reference but is no longer used.
-
 ---
 
 ## Architecture
@@ -48,9 +44,7 @@ Both asset types are uploaded directly from the browser to S3 via a pre-signed P
 ```
 supabase/
 ├── 00_DELETE_EVERYTHING.sql   ← ⚠️  Wipes everything (use to reset)
-├── 01_SETUP_EVERYTHING.sql    ← ✅  Database tables + RLS policies
-├── 02_SETUP_STORAGE.sql       ← 🗄️  Legacy (Supabase Storage no longer used)
-└── README.md                  ← This file
+└── 01_SETUP_EVERYTHING.sql    ← ✅  Database tables + RLS policies
 ```
 
 ---
