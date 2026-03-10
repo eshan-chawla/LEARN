@@ -3,38 +3,30 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { book_id, job_id, storage_path } = body;
+    const { book_id, storage_path } = body;
 
-    // Validate input
-    if (!book_id || !job_id || !storage_path) {
+    if (!book_id || !storage_path) {
       return NextResponse.json(
-        { error: 'Missing required fields: book_id, job_id, storage_path' },
+        { error: 'Missing required fields: book_id, storage_path' },
         { status: 400 }
       );
     }
 
-    // Get Modal webhook URL from environment
     const modalWebhookUrl = process.env.MODAL_WEBHOOK_URL;
 
     if (!modalWebhookUrl) {
-      console.error('MODAL_WEBHOOK_URL not configured');
+      console.warn('MODAL_WEBHOOK_URL not configured — skipping processing trigger');
       return NextResponse.json(
-        { error: 'PDF processing is not configured. Please set MODAL_WEBHOOK_URL in environment variables.' },
+        { error: 'PDF processing is not configured. Set MODAL_WEBHOOK_URL in environment variables.' },
         { status: 500 }
       );
     }
 
-    // Invoke Modal function via webhook
+    // Invoke Modal/Lambda function via webhook
     const modalResponse = await fetch(modalWebhookUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        book_id,
-        job_id,
-        storage_path
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ book_id, storage_path }),
     });
 
     if (!modalResponse.ok) {
@@ -43,16 +35,10 @@ export async function POST(request: NextRequest) {
       throw new Error('Failed to invoke Modal function');
     }
 
-    const modalResult = await modalResponse.json();
-
-    return NextResponse.json({
-      success: true,
-      job_id,
-      message: 'PDF processing started via Modal'
-    });
+    return NextResponse.json({ success: true, message: 'PDF processing started' });
 
   } catch (error: any) {
-    console.error('Error invoking Lambda:', error);
+    console.error('Error invoking PDF processor:', error);
     return NextResponse.json(
       { error: error.message || 'Failed to start PDF processing' },
       { status: 500 }
@@ -60,54 +46,43 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET endpoint to check job status
+// GET: check processing status from the books table directly
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const jobId = searchParams.get('job_id');
+    const bookId = searchParams.get('book_id');
 
-    if (!jobId) {
-      return NextResponse.json(
-        { error: 'Missing job_id parameter' },
-        { status: 400 }
-      );
+    if (!bookId) {
+      return NextResponse.json({ error: 'Missing book_id parameter' }, { status: 400 });
     }
 
-    // Query the job status from Supabase
-    // Note: This will use the user's auth context automatically
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
     const response = await fetch(
-      `${supabaseUrl}/rest/v1/pdf_processing_jobs?id=eq.${jobId}`,
+      `${supabaseUrl}/rest/v1/books?id=eq.${bookId}&select=id,processing_status,error_message`,
       {
         headers: {
-          'apikey': supabaseKey,
-          'Authorization': `Bearer ${supabaseKey}`,
-          'Content-Type': 'application/json'
-        }
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
       }
     );
 
-    if (!response.ok) {
-      throw new Error('Failed to fetch job status');
+    if (!response.ok) throw new Error('Failed to fetch book status');
+
+    const books = await response.json();
+
+    if (books.length === 0) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    const jobs = await response.json();
-
-    if (jobs.length === 0) {
-      return NextResponse.json(
-        { error: 'Job not found' },
-        { status: 404 }
-      );
-    }
-
-    return NextResponse.json(jobs[0]);
+    return NextResponse.json(books[0]);
 
   } catch (error: any) {
-    console.error('Error fetching job status:', error);
+    console.error('Error fetching book status:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch job status' },
+      { error: error.message || 'Failed to fetch status' },
       { status: 500 }
     );
   }

@@ -118,28 +118,13 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
 
       setUploadProgress(85);
 
-      // Step 4: Create a PDF processing job for Lambda/embeddings
-      const { data: jobData, error: jobError } = await supabase
-        .from('pdf_processing_jobs')
-        .insert({
-          book_id: bookData.id,
-          status: 'pending',
-          progress: 0,
-        })
-        .select()
-        .single();
-
-      if (jobError) throw jobError;
-
-      setUploadProgress(95);
-
-      // Step 5: Trigger Lambda to process the PDF
+      // Step 4: Trigger Lambda to process the PDF
+      // Lambda will update books.processing_status and books.error_message directly
       const processRes = await fetch('/api/process-pdf', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           book_id: bookData.id,
-          job_id: jobData.id,
           storage_path: storagePath,
         }),
       });

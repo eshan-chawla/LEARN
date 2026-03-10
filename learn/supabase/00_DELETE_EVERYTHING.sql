@@ -4,7 +4,7 @@
 
 -- Drop tables first (CASCADE will automatically drop all triggers, constraints, policies, etc.)
 -- Using IF EXISTS to avoid errors if tables don't exist
-DROP TABLE IF EXISTS pdf_processing_jobs CASCADE;
+
 DROP TABLE IF EXISTS notes CASCADE;
 DROP TABLE IF EXISTS books CASCADE;
 DROP TABLE IF EXISTS recordings CASCADE;
