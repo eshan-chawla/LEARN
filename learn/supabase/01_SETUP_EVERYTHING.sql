@@ -30,6 +30,16 @@ CREATE TABLE classes (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Book Sections table
+CREATE TABLE book_sections (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- User-Class membership table
 CREATE TABLE user_class (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -57,12 +67,14 @@ CREATE TABLE recordings (
 CREATE TABLE books (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  section_id UUID REFERENCES book_sections(id) ON DELETE SET NULL,
   title TEXT NOT NULL,
   pdf_url TEXT NOT NULL,
   file_size INTEGER,
   processing_status TEXT DEFAULT 'pending' CHECK (processing_status IN ('pending', 'processing', 'completed', 'failed')),
   error_message TEXT,
   storage_path TEXT,
+  position INTEGER NOT NULL DEFAULT 0,
   uploaded_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -85,9 +97,13 @@ CREATE TABLE notes (
 CREATE INDEX idx_classes_user_id ON classes(user_id);
 CREATE UNIQUE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_classes_slug ON classes(slug);
+CREATE INDEX idx_book_sections_class_id ON book_sections(class_id);
+CREATE INDEX idx_book_sections_class_id_position ON book_sections(class_id, position);
 CREATE INDEX idx_user_class_class_id ON user_class(class_id);
 CREATE INDEX idx_recordings_class_id ON recordings(class_id);
 CREATE INDEX idx_books_class_id ON books(class_id);
+CREATE INDEX idx_books_section_id ON books(section_id);
+CREATE INDEX idx_books_section_id_position ON books(section_id, position);
 CREATE INDEX idx_notes_class_id ON notes(class_id);
 
 -- ============================================================================
@@ -167,6 +183,50 @@ AS $$
       AND user_class.user_id = auth.uid()
       AND user_class.can_edit = TRUE
   );
+$$;
+
+CREATE OR REPLACE FUNCTION is_teacher_user(target_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM public.users
+    WHERE users.id = target_user_id
+      AND users.is_teacher = TRUE
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION create_class(
+  class_name TEXT,
+  class_description TEXT DEFAULT NULL,
+  class_slug TEXT DEFAULT NULL
+)
+RETURNS public.classes
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  created_class public.classes%ROWTYPE;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+
+  IF NOT is_teacher_user(auth.uid()) THEN
+    RAISE EXCEPTION 'Only teachers can create classes';
+  END IF;
+
+  INSERT INTO public.classes (user_id, name, description, slug)
+  VALUES (auth.uid(), class_name, class_description, class_slug)
+  RETURNING * INTO created_class;
+
+  RETURN created_class;
+END;
 $$;
 
 CREATE OR REPLACE FUNCTION grant_class_owner_membership()
@@ -285,6 +345,11 @@ CREATE TRIGGER trigger_update_classes_updated_at
   FOR EACH ROW
   EXECUTE FUNCTION update_updated_at_column();
 
+CREATE TRIGGER trigger_update_book_sections_updated_at
+  BEFORE UPDATE ON book_sections
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
 CREATE TRIGGER trigger_update_user_class_updated_at
   BEFORE UPDATE ON user_class
   FOR EACH ROW
@@ -347,6 +412,7 @@ SET
 -- Enable RLS on all tables
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE classes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE book_sections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_class ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recordings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE books ENABLE ROW LEVEL SECURITY;
@@ -360,10 +426,35 @@ CREATE POLICY "Users can view their own profile"
   ON users FOR SELECT
   USING (auth.uid() = id);
 
+CREATE POLICY "Users can create their own profile"
+  ON users FOR INSERT
+  WITH CHECK (auth.uid() = id);
+
 CREATE POLICY "Users can update their own profile"
   ON users FOR UPDATE
   USING (auth.uid() = id)
   WITH CHECK (auth.uid() = id);
+
+-- ============================================================================
+-- RLS POLICIES: BOOK_SECTIONS
+-- ============================================================================
+
+CREATE POLICY "Users can view book sections for accessible classes"
+  ON book_sections FOR SELECT
+  USING (can_view_class(class_id));
+
+CREATE POLICY "Users can create book sections for editable classes"
+  ON book_sections FOR INSERT
+  WITH CHECK (can_edit_class(class_id));
+
+CREATE POLICY "Users can update book sections for editable classes"
+  ON book_sections FOR UPDATE
+  USING (can_edit_class(class_id))
+  WITH CHECK (can_edit_class(class_id));
+
+CREATE POLICY "Users can delete book sections for editable classes"
+  ON book_sections FOR DELETE
+  USING (can_edit_class(class_id));
 
 -- ============================================================================
 -- RLS POLICIES: USER_CLASS
@@ -434,11 +525,7 @@ CREATE POLICY "Users can create their own classes"
   ON classes FOR INSERT
   WITH CHECK (
     auth.uid() = user_id
-    AND EXISTS (
-      SELECT 1 FROM users
-      WHERE users.id = auth.uid()
-      AND users.is_teacher = TRUE
-    )
+    AND is_teacher_user(auth.uid())
   );
 
 CREATE POLICY "Users can update their own classes"
@@ -519,6 +606,7 @@ CREATE POLICY "Users can delete notes of their classes"
 
 COMMENT ON TABLE classes IS 'Classes created by users';
 COMMENT ON TABLE users IS 'Application user profiles synced from auth.users';
+COMMENT ON TABLE book_sections IS 'Ordered sections inside a class that group books';
 COMMENT ON TABLE user_class IS 'Maps users to classes with viewer/editor access';
 COMMENT ON TABLE recordings IS 'Video recordings for classes';
 COMMENT ON TABLE books IS 'PDF books/documents for classes';
@@ -526,11 +614,14 @@ COMMENT ON TABLE notes IS 'Text notes for classes (one per class)';
 
 COMMENT ON COLUMN classes.user_id IS 'UUID of the user who owns this class (matches auth.users.id)';
 COMMENT ON COLUMN users.is_teacher IS 'Only teachers can create classes';
+COMMENT ON COLUMN book_sections.position IS 'Display order of the section inside the class';
 COMMENT ON COLUMN user_class.can_edit IS 'TRUE means the user can edit class content; FALSE means view-only access';
 COMMENT ON COLUMN classes.slug IS 'URL-friendly slug for the class';
 COMMENT ON COLUMN books.processing_status IS 'Status of PDF processing: pending, processing, completed, or failed';
 COMMENT ON COLUMN books.error_message IS 'Error details if processing_status is failed';
 COMMENT ON COLUMN books.storage_path IS 'S3 key for the PDF (e.g., books/class-id/file.pdf)';
+COMMENT ON COLUMN books.position IS 'Display order of the book inside its section';
+COMMENT ON FUNCTION create_class(TEXT, TEXT, TEXT) IS 'Creates a class for the current authenticated teacher user';
 COMMENT ON FUNCTION list_class_viewers(UUID) IS 'Returns view-only class members for editors of that class';
 COMMENT ON FUNCTION add_user_to_class_by_email(UUID, TEXT, BOOLEAN) IS 'Adds an existing user to a class by email for editors of that class';
 

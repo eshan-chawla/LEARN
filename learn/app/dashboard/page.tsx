@@ -23,6 +23,17 @@ interface UserProfile {
   is_teacher: boolean;
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+
+  if (typeof error === 'object' && error !== null && 'message' in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim()) return message;
+  }
+
+  return fallback;
+}
+
 export default function DashboardPage() {
   const auth = useAuth();
   const router = useRouter();
@@ -43,31 +54,43 @@ export default function DashboardPage() {
   const loadUserProfile = useCallback(async () => {
     if (!auth.user) return;
 
+    const fallbackProfile = {
+      id: auth.user.id,
+      email: auth.user.email || '',
+      name: auth.user.user_metadata?.name || auth.user.email || 'User',
+      is_teacher: false,
+    };
+
     try {
-      const { data, error } = await supabase
+      const profileResult = await supabase
         .from('users')
         .select('id, email, name, is_teacher')
         .eq('id', auth.user.id)
         .maybeSingle();
 
-      if (error) throw error;
+      if (profileResult.error) throw profileResult.error;
 
-      setUserProfile(
-        data ?? {
-          id: auth.user.id,
-          email: auth.user.email || '',
-          name: auth.user.user_metadata?.name || auth.user.email || 'User',
-          is_teacher: false,
-        }
-      );
+      let data = profileResult.data;
+
+      if (!data) {
+        const insertResult = await supabase
+          .from('users')
+          .insert({
+            id: fallbackProfile.id,
+            email: fallbackProfile.email,
+            name: fallbackProfile.name,
+          })
+          .select('id, email, name, is_teacher')
+          .single();
+
+        if (insertResult.error) throw insertResult.error;
+        data = insertResult.data;
+      }
+
+      setUserProfile(data ?? fallbackProfile);
     } catch (error) {
       console.error('Error loading user profile:', error);
-      setUserProfile({
-        id: auth.user.id,
-        email: auth.user.email || '',
-        name: auth.user.user_metadata?.name || auth.user.email || 'User',
-        is_teacher: false,
-      });
+      setUserProfile(fallbackProfile);
     }
   }, [auth.user]);
 
@@ -115,40 +138,15 @@ export default function DashboardPage() {
     try {
       setLoading(true);
       const slug = generateSlug(newClassName) + '-' + Date.now().toString(36);
+      const { data, error } = await supabase.rpc('create_class', {
+        class_name: newClassName,
+        class_description: newClassDescription || null,
+        class_slug: slug,
+      });
 
-      // Try to create with slug, fallback to without slug if column doesn't exist
-      const insertData = {
-        name: newClassName,
-        description: newClassDescription || null,
-        user_id: auth.user.id,
-      };
-
-      // First, check if slug column exists by trying to insert with it
-      let { data, error } = await supabase
-        .from('classes')
-        .insert({
-          ...insertData,
-          slug,
-        })
-        .select()
-        .single();
-
-      // If error is about missing column, try without slug
-      if (error && error.message?.includes('column') && error.message?.includes('slug')) {
-        console.log('Slug column not found, creating without slug');
-        const result = await supabase
-          .from('classes')
-          .insert(insertData)
-          .select()
-          .single();
-
-        data = result.data;
-        error = result.error;
-      }
-
-      if (error) {
+      if (error || !data) {
         console.error('Supabase error details:', error);
-        throw error;
+        throw error || new Error('Failed to create class');
       }
 
       setClasses([data, ...classes]);
@@ -159,7 +157,7 @@ export default function DashboardPage() {
       // Navigate to the new class page using slug if available, otherwise use ID
       router.push(`/dashboard/class/${data.slug || data.id}`);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      const message = getErrorMessage(error, 'Unknown error');
       console.error('Error creating class:', error);
       alert(`Failed to create class: ${message}`);
     } finally {

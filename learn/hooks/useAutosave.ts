@@ -1,7 +1,31 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { debounce } from '@/lib/utils';
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+
+  if (typeof error === 'object' && error !== null) {
+    if ('message' in error) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string' && message.trim()) return message;
+    }
+
+    if ('error_description' in error) {
+      const description = (error as { error_description?: unknown }).error_description;
+      if (typeof description === 'string' && description.trim()) return description;
+    }
+
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== '{}') return serialized;
+    } catch {
+      // Ignore serialization issues and use fallback below.
+    }
+  }
+
+  return fallback;
+}
 
 interface UseAutosaveOptions {
   /**
@@ -30,6 +54,11 @@ interface UseAutosaveReturn {
    * Function to update the value
    */
   setValue: (value: string) => void;
+
+  /**
+   * Replace local value without triggering autosave
+   */
+  resetValue: (value: string) => void;
 
   /**
    * Current save status
@@ -68,67 +97,124 @@ export function useAutosave({
   const [status, setStatus] = useState<SaveStatus>('idle');
   const [error, setError] = useState<string | null>(null);
 
+  const onSaveRef = useRef(onSave);
+  const valueRef = useRef(initialValue);
   const lastSavedValue = useRef(initialValue);
   const isSaving = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Function to perform the actual save
+  useEffect(() => {
+    onSaveRef.current = onSave;
+  }, [onSave]);
+
+  const clearSaveTimer = useCallback(() => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  }, []);
+
+  const clearStatusTimer = useCallback(() => {
+    if (statusTimerRef.current) {
+      clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleSaveRef = useRef<(valueToSave: string) => void>(() => {});
+
   const performSave = useCallback(async (valueToSave: string) => {
-    // Don't save if already saving or if value hasn't changed
     if (isSaving.current || valueToSave === lastSavedValue.current) {
       return;
     }
 
     isSaving.current = true;
+    clearStatusTimer();
     setStatus('saving');
     setError(null);
 
     try {
-      await onSave(valueToSave);
+      await onSaveRef.current(valueToSave);
       lastSavedValue.current = valueToSave;
       setStatus('saved');
 
-      // Reset to idle after 2 seconds
-      setTimeout(() => {
+      statusTimerRef.current = setTimeout(() => {
         setStatus('idle');
+        statusTimerRef.current = null;
       }, 2000);
     } catch (err) {
       setStatus('error');
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      setError(getErrorMessage(err, 'Failed to save'));
       console.error('Autosave error:', err);
     } finally {
       isSaving.current = false;
+
+      if (valueRef.current !== lastSavedValue.current) {
+        scheduleSaveRef.current(valueRef.current);
+      }
     }
-  }, [onSave]);
+  }, [clearStatusTimer]);
 
-  // Create debounced save function
-  const debouncedSave = useRef(
-    debounce((valueToSave: string) => {
-      performSave(valueToSave);
-    }, delay)
-  );
-
-  // Update debounced function if delay changes
   useEffect(() => {
-    debouncedSave.current = debounce((valueToSave: string) => {
-      performSave(valueToSave);
-    }, delay);
-  }, [delay, performSave]);
+    scheduleSaveRef.current = (valueToSave: string) => {
+      clearSaveTimer();
 
-  // Trigger debounced save when value changes
+      if (valueToSave === lastSavedValue.current) {
+        return;
+      }
+
+      saveTimerRef.current = setTimeout(() => {
+        saveTimerRef.current = null;
+        void performSave(valueToSave);
+      }, delay);
+    };
+  }, [clearSaveTimer, delay, performSave]);
+
+  const updateValue = useCallback((nextValue: string) => {
+    valueRef.current = nextValue;
+    setValue(nextValue);
+  }, []);
+
+  const resetValue = useCallback((nextValue: string) => {
+    clearSaveTimer();
+    clearStatusTimer();
+    valueRef.current = nextValue;
+    lastSavedValue.current = nextValue;
+    setValue(nextValue);
+    setStatus('idle');
+    setError(null);
+  }, [clearSaveTimer, clearStatusTimer]);
+
+  useEffect(() => {
+    valueRef.current = value;
+  }, [value]);
+
   useEffect(() => {
     if (value !== lastSavedValue.current) {
-      debouncedSave.current(value);
+      scheduleSaveRef.current(value);
+    } else {
+      clearSaveTimer();
     }
-  }, [value]);
+  }, [clearSaveTimer, value]);
+
+  useEffect(() => {
+    return () => {
+      clearSaveTimer();
+      clearStatusTimer();
+    };
+  }, [clearSaveTimer, clearStatusTimer]);
 
   // Manual save function (bypasses debounce)
   const save = useCallback(async () => {
-    await performSave(value);
-  }, [value, performSave]);
+    clearSaveTimer();
+    await performSave(valueRef.current);
+  }, [clearSaveTimer, performSave]);
 
   return {
     value,
-    setValue,
+    setValue: updateValue,
+    resetValue,
     status,
     error,
     save,

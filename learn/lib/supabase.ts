@@ -107,6 +107,32 @@ export interface Database {
           updated_at?: string;
         };
       };
+      book_sections: {
+        Row: {
+          id: string;
+          class_id: string;
+          title: string;
+          position: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          class_id: string;
+          title: string;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          class_id?: string;
+          title?: string;
+          position?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       recordings: {
         Row: {
           id: string;
@@ -146,36 +172,42 @@ export interface Database {
         Row: {
           id: string;
           class_id: string;
+          section_id: string | null;
           title: string;
           pdf_url: string;
           file_size: number | null;
           processing_status: 'pending' | 'processing' | 'completed' | 'failed';
           error_message: string | null;
           storage_path: string | null;
+          position: number;
           uploaded_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
           class_id: string;
+          section_id?: string | null;
           title: string;
           pdf_url: string;
           file_size?: number | null;
           processing_status?: 'pending' | 'processing' | 'completed' | 'failed';
           error_message?: string | null;
           storage_path?: string | null;
+          position?: number;
           uploaded_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
           class_id?: string;
+          section_id?: string | null;
           title?: string;
           pdf_url?: string;
           file_size?: number | null;
           processing_status?: 'pending' | 'processing' | 'completed' | 'failed';
           error_message?: string | null;
           storage_path?: string | null;
+          position?: number;
           uploaded_at?: string;
           updated_at?: string;
         };

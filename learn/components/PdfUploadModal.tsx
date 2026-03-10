@@ -5,12 +5,14 @@ import { supabase } from '@/lib/supabase';
 
 interface PdfUploadModalProps {
   classId: string;
+  sectionId?: string | null;
+  startingPosition: number;
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploadModalProps) {
+export function PdfUploadModal({ classId, sectionId = null, startingPosition, isOpen, onClose, onSuccess }: PdfUploadModalProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -89,11 +91,13 @@ export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploa
       .from('books')
       .insert({
         class_id: classId,
+        section_id: sectionId,
         title: getBookTitle(file.name),
         pdf_url: publicUrl,
         storage_path: storagePath,
         file_size: file.size,
         processing_status: 'pending',
+        position: startingPosition + index,
       })
       .select()
       .single();
