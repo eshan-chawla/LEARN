@@ -5,6 +5,10 @@ import { useRouter, useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatDate } from '@/lib/utils';
+import { useAutosave } from '@/hooks/useAutosave';
+import { SaveStatusIndicator } from '@/components/SaveStatusIndicator';
+import { PdfUploadModal } from '@/components/PdfUploadModal';
+import { ProcessingStatusBadge } from '@/components/ProcessingStatusBadge';
 import Link from 'next/link';
 
 interface Class {
@@ -29,6 +33,8 @@ interface Book {
   class_id: string;
   title: string;
   pdf_url: string;
+  processing_status: 'pending' | 'processing' | 'completed' | 'failed';
+  storage_path: string | null;
   uploaded_at: string;
 }
 
@@ -55,6 +61,43 @@ export default function ClassPage() {
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [books, setBooks] = useState<Book[]>([]);
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
+  const [noteId, setNoteId] = useState<string | null>(null);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+
+  // Autosave hook for notes
+  const autosave = useAutosave({
+    onSave: async (content: string) => {
+      if (!classData) return;
+
+      if (noteId) {
+        // Update existing note
+        const { error } = await supabase
+          .from('notes')
+          .update({ content })
+          .eq('id', noteId);
+
+        if (error) throw error;
+      } else {
+        // Insert new note
+        const { data, error } = await supabase
+          .from('notes')
+          .insert({
+            class_id: classData.id,
+            content,
+          })
+          .select()
+          .single();
+
+        if (error) throw error;
+
+        // Save the note ID for future updates
+        setNoteId(data.id);
+        setCurrentNote(data);
+      }
+    },
+    delay: 2000,
+    initialValue: '',
+  });
 
   useEffect(() => {
     if (!auth.loading && !auth.user) {
@@ -175,7 +218,15 @@ export default function ClassPage() {
         throw error;
       }
 
-      setCurrentNote(data || { id: '', class_id: classData.id, content: '', updated_at: new Date().toISOString() });
+      if (data) {
+        setCurrentNote(data);
+        setNoteId(data.id);
+        autosave.setValue(data.content || '');
+      } else {
+        setCurrentNote({ id: '', class_id: classData.id, content: '', updated_at: new Date().toISOString() });
+        setNoteId(null);
+        autosave.setValue('');
+      }
     } catch (error) {
       console.error('Error loading note:', error);
     }
@@ -212,75 +263,11 @@ export default function ClassPage() {
     }
   };
 
-  const handleAddBook = async () => {
-    if (!classData) return;
-
-    const title = prompt('Enter book title:');
-    const pdfUrl = prompt('Enter PDF URL or upload path:');
-
-    if (title && pdfUrl) {
-      try {
-        setLoading(true);
-        const { data, error } = await supabase
-          .from('books')
-          .insert({
-            class_id: classData.id,
-            title,
-            pdf_url: pdfUrl,
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        setBooks([data, ...books]);
-      } catch (error) {
-        console.error('Error adding book:', error);
-        alert('Failed to add book. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    }
+  const handleUploadSuccess = () => {
+    // Reload books after successful upload
+    loadBooks();
   };
 
-  const handleSaveNote = async () => {
-    if (!classData || !currentNote) return;
-
-    try {
-      setLoading(true);
-
-      if (currentNote.id) {
-        // Update existing note
-        const { error } = await supabase
-          .from('notes')
-          .update({ content: currentNote.content })
-          .eq('id', currentNote.id);
-
-        if (error) throw error;
-      } else {
-        // Insert new note
-        const { data, error } = await supabase
-          .from('notes')
-          .insert({
-            class_id: classData.id,
-            content: currentNote.content,
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        setCurrentNote(data);
-      }
-
-      alert('Note saved successfully!');
-    } catch (error) {
-      console.error('Error saving note:', error);
-      alert('Failed to save note. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSignOut = async () => {
     try {
@@ -454,13 +441,13 @@ export default function ClassPage() {
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="text-lg font-semibold text-gray-900">Books & PDFs</h3>
                   <button
-                    onClick={handleAddBook}
+                    onClick={() => setUploadModalOpen(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                    Add Book
+                    Upload PDF
                   </button>
                 </div>
                 {books.length === 0 ? (
@@ -481,8 +468,20 @@ export default function ClassPage() {
                             </svg>
                           </div>
                           <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 mb-1">{book.title}</h4>
-                            <p className="text-xs text-gray-500 mb-2">
+                            <div className="flex items-center justify-between mb-1">
+                              <h4 className="font-medium text-gray-900">{book.title}</h4>
+                            </div>
+                            <ProcessingStatusBadge
+                              bookId={book.id}
+                              initialStatus={book.processing_status}
+                              onStatusChange={(status) => {
+                                // Update book status in local state
+                                setBooks(books.map(b =>
+                                  b.id === book.id ? { ...b, processing_status: status } : b
+                                ));
+                              }}
+                            />
+                            <p className="text-xs text-gray-500 mt-2 mb-2">
                               Uploaded: {formatDate(book.uploaded_at)}
                             </p>
                             <a
@@ -506,21 +505,13 @@ export default function ClassPage() {
               <div>
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="text-lg font-semibold text-gray-900">Notes</h3>
-                  <button
-                    onClick={handleSaveNote}
-                    className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 text-sm"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    Save Note
-                  </button>
+                  <SaveStatusIndicator status={autosave.status} error={autosave.error} />
                 </div>
                 <div className="border rounded-lg overflow-hidden">
                   <textarea
-                    value={currentNote?.content || ''}
-                    onChange={(e) => setCurrentNote(currentNote ? { ...currentNote, content: e.target.value } : null)}
-                    placeholder="Write your notes here..."
+                    value={autosave.value}
+                    onChange={(e) => autosave.setValue(e.target.value)}
+                    placeholder="Write your notes here... (autosaves as you type)"
                     className="w-full h-96 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-gray-900"
                   />
                 </div>
@@ -534,6 +525,17 @@ export default function ClassPage() {
           </div>
         </div>
       </div>
+
+      {/* PDF Upload Modal */}
+      {classData && auth.user && (
+        <PdfUploadModal
+          classId={classData.id}
+          userId={auth.user.id}
+          isOpen={uploadModalOpen}
+          onClose={() => setUploadModalOpen(false)}
+          onSuccess={handleUploadSuccess}
+        />
+      )}
     </div>
   );
 }
