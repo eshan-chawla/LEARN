@@ -30,15 +30,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields: classId, content' }, { status: 400 });
     }
 
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { data, error } = await supabase
       .from('notes')
       .upsert(
         {
           class_id: classId,
+          user_id: user.id,
           content,
         },
         {
-          onConflict: 'class_id',
+          onConflict: 'class_id,user_id',
         }
       )
       .select()

@@ -55,6 +55,7 @@ interface Book {
 interface Note {
   id: string;
   class_id: string;
+  user_id: string;
   content: string | null;
   updated_at: string;
 }
@@ -272,9 +273,10 @@ export default function ClassPage() {
   const noteContentRef = useRef('');
   const currentNoteContentRef = useRef('');
   const classIdRef = useRef<string | null>(null);
-  const canEditClassRef = useRef(false);
+  const canUseNotesRef = useRef(false);
   const canEditClass = classRole === 'owner' || classRole === 'manager';
   const isOwner = classRole === 'owner';
+  const canUseNotes = classRole !== null;
 
   useEffect(() => {
     if (!auth.loading && !auth.user) {
@@ -409,8 +411,8 @@ export default function ClassPage() {
   }, [classData]);
 
   useEffect(() => {
-    canEditClassRef.current = canEditClass;
-  }, [canEditClass]);
+    canUseNotesRef.current = canUseNotes;
+  }, [canUseNotes]);
 
   useEffect(() => {
     if (!memberMenu) return;
@@ -455,23 +457,30 @@ export default function ClassPage() {
 
   useEffect(() => {
     const loadNote = async () => {
-      if (!classData || activeTab !== 'notes') return;
+      if (!classData || !auth.user || activeTab !== 'notes') return;
 
       try {
         const { data, error } = await supabase
           .from('notes')
           .select('*')
           .eq('class_id', classData.id)
-          .single();
+          .eq('user_id', auth.user.id)
+          .maybeSingle();
 
-        if (error && error.code !== 'PGRST116') throw error;
+        if (error) throw error;
 
         if (data) {
           setCurrentNote(data as Note);
           setNoteContent(data.content || '');
           setNoteError(null);
         } else {
-          setCurrentNote({ id: '', class_id: classData.id, content: '', updated_at: new Date().toISOString() });
+          setCurrentNote({
+            id: '',
+            class_id: classData.id,
+            user_id: auth.user.id,
+            content: '',
+            updated_at: new Date().toISOString(),
+          });
           setNoteContent('');
           setNoteError(null);
         }
@@ -481,7 +490,7 @@ export default function ClassPage() {
     };
 
     void loadNote();
-  }, [activeTab, classData]);
+  }, [activeTab, classData, auth.user]);
 
   useEffect(() => {
     const loadMembers = async () => {
@@ -1028,7 +1037,7 @@ export default function ClassPage() {
   };
 
   const persistNote = async (content: string, options?: { background?: boolean }) => {
-    if (!classData || !canEditClass) return true;
+    if (!classData || !auth.user) return true;
 
     const payload = {
       classId: classData.id,
@@ -1063,10 +1072,11 @@ export default function ClassPage() {
         .upsert(
           {
             class_id: classData.id,
+            user_id: auth.user.id,
             content,
           },
           {
-            onConflict: 'class_id',
+            onConflict: 'class_id,user_id',
           }
         )
         .select()
@@ -1095,7 +1105,7 @@ export default function ClassPage() {
   };
 
   const savedNoteContent = currentNote?.content || '';
-  const hasUnsavedNoteChanges = canEditClass && activeTab === 'notes' && noteContent !== savedNoteContent;
+  const hasUnsavedNoteChanges = canUseNotes && activeTab === 'notes' && noteContent !== savedNoteContent;
 
   const handleTabChange = async (nextTab: TabType) => {
     if (nextTab === activeTab) return;
@@ -1115,7 +1125,7 @@ export default function ClassPage() {
       }
 
       const currentClassId = classIdRef.current;
-      if (!currentClassId || !canEditClassRef.current) return;
+      if (!currentClassId || !canUseNotesRef.current) return;
 
       const latestContent = noteContentRef.current;
       const savedContent = currentNoteContentRef.current;
@@ -1779,8 +1789,11 @@ export default function ClassPage() {
             {activeTab === 'notes' && (
               <div>
                 <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">Notes</h3>
-                  {canEditClass && (
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900">My Notes</h3>
+                    <p className="text-sm text-gray-500">Markdown supported.</p>
+                  </div>
+                  {canUseNotes && (
                     <button
                       onClick={() => void handleSaveNote()}
                       disabled={savingNote}
@@ -1798,10 +1811,10 @@ export default function ClassPage() {
                 <div className="border rounded-lg overflow-hidden">
                   <textarea
                     value={noteContent}
-                    onChange={(e) => canEditClass && setNoteContent(e.target.value)}
-                    readOnly={!canEditClass}
-                    placeholder={canEditClass ? 'Write your notes here...' : 'Notes are view-only for your access level'}
-                    className="w-full h-96 px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none text-gray-900 read-only:bg-gray-50"
+                    onChange={(e) => canUseNotes && setNoteContent(e.target.value)}
+                    readOnly={!canUseNotes}
+                    placeholder={canUseNotes ? 'Write your markdown notes here...' : 'Notes are unavailable for your access level'}
+                    className="w-full h-96 resize-none px-4 py-3 font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 read-only:bg-gray-50"
                   />
                 </div>
                 {currentNote && currentNote.updated_at && (

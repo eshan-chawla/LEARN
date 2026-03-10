@@ -11,6 +11,7 @@ Run these SQL scripts in order in your **Supabase Dashboard → SQL Editor**:
 | 2 | `02_ADD_USERS_TABLE_AND_TEACHER_ROLE.sql` | Apply on existing databases to add user profiles + teacher-gated class creation |
 | 3 | `03_ADD_USER_CLASS_MEMBERSHIPS.sql` | Apply on existing databases to add class memberships |
 | 4 | `04_REPLACE_USER_CLASS_ROLES.sql` | Apply on existing databases to replace boolean edit access with `owner` / `manager` / `student` roles |
+| 5 | `05_NOTES_PER_USER_MARKDOWN.sql` | Apply on existing databases to convert shared class notes into per-user markdown notes |
 
 ---
 
@@ -33,7 +34,7 @@ Both asset types are uploaded directly from the browser to S3 via a pre-signed P
 - `users` — App user profiles and roles, synced from `auth.users`
 - `recordings` — Video recording metadata (video hosted on S3)
 - `books` — PDF metadata (PDF hosted on S3)
-- `notes` — Text notes per class
+- `notes` — Private markdown notes per user per class
 - `user_class` — User-to-class memberships with `owner` / `manager` / `student` roles
 - `pdf_processing_jobs` — Tracks async PDF processing for Lambda/embeddings
 

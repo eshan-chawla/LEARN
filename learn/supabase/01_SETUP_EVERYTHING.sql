@@ -83,10 +83,11 @@ CREATE TABLE books (
 CREATE TABLE notes (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   content TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(class_id)
+  UNIQUE(class_id, user_id)
 );
 
 
@@ -105,6 +106,7 @@ CREATE INDEX idx_books_class_id ON books(class_id);
 CREATE INDEX idx_books_section_id ON books(section_id);
 CREATE INDEX idx_books_section_id_position ON books(section_id, position);
 CREATE INDEX idx_notes_class_id ON notes(class_id);
+CREATE INDEX idx_notes_user_id ON notes(user_id);
 
 -- ============================================================================
 -- TRIGGERS FOR UPDATED_AT
@@ -840,22 +842,37 @@ CREATE POLICY "Users can delete books of their classes"
 -- RLS POLICIES: NOTES
 -- ============================================================================
 
-CREATE POLICY "Users can view notes of their classes"
+CREATE POLICY "Users can view their own notes for accessible classes"
   ON notes FOR SELECT
-  USING (can_view_class(class_id));
+  USING (
+    user_id = auth.uid()
+    AND can_view_class(class_id)
+  );
 
-CREATE POLICY "Users can create notes for their classes"
+CREATE POLICY "Users can create their own notes for accessible classes"
   ON notes FOR INSERT
-  WITH CHECK (can_edit_class(class_id));
+  WITH CHECK (
+    user_id = auth.uid()
+    AND can_view_class(class_id)
+  );
 
-CREATE POLICY "Users can update notes of their classes"
+CREATE POLICY "Users can update their own notes for accessible classes"
   ON notes FOR UPDATE
-  USING (can_edit_class(class_id))
-  WITH CHECK (can_edit_class(class_id));
+  USING (
+    user_id = auth.uid()
+    AND can_view_class(class_id)
+  )
+  WITH CHECK (
+    user_id = auth.uid()
+    AND can_view_class(class_id)
+  );
 
-CREATE POLICY "Users can delete notes of their classes"
+CREATE POLICY "Users can delete their own notes for accessible classes"
   ON notes FOR DELETE
-  USING (can_edit_class(class_id));
+  USING (
+    user_id = auth.uid()
+    AND can_view_class(class_id)
+  );
 
 -- ============================================================================
 -- COMMENTS
@@ -867,12 +884,13 @@ COMMENT ON TABLE book_sections IS 'Ordered sections inside a class that group bo
 COMMENT ON TABLE user_class IS 'Maps users to classes with owner, manager, or student access';
 COMMENT ON TABLE recordings IS 'Video recordings for classes';
 COMMENT ON TABLE books IS 'PDF books/documents for classes';
-COMMENT ON TABLE notes IS 'Text notes for classes (one per class)';
+COMMENT ON TABLE notes IS 'Private markdown notes per user per class';
 
 COMMENT ON COLUMN classes.user_id IS 'UUID of the user who owns this class (matches auth.users.id)';
 COMMENT ON COLUMN users.is_teacher IS 'Only teachers can create classes';
 COMMENT ON COLUMN book_sections.position IS 'Display order of the section inside the class';
 COMMENT ON COLUMN user_class.role IS 'owner can manage roles and transfer ownership; manager can edit class content and add/remove students; student has view-only access';
+COMMENT ON COLUMN notes.content IS 'Markdown note content for a specific user and class';
 COMMENT ON COLUMN classes.slug IS 'URL-friendly slug for the class';
 COMMENT ON COLUMN books.processing_status IS 'Status of PDF processing: pending, processing, completed, or failed';
 COMMENT ON COLUMN books.error_message IS 'Error details if processing_status is failed';

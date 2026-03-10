@@ -216,6 +216,7 @@ export interface Database {
         Row: {
           id: string;
           class_id: string;
+          user_id: string;
           content: string | null;
           created_at: string;
           updated_at: string;
@@ -223,6 +224,7 @@ export interface Database {
         Insert: {
           id?: string;
           class_id: string;
+          user_id: string;
           content?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -230,6 +232,7 @@ export interface Database {
         Update: {
           id?: string;
           class_id?: string;
+          user_id?: string;
           content?: string | null;
           created_at?: string;
           updated_at?: string;
