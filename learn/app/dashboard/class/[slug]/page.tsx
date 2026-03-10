@@ -89,6 +89,11 @@ interface BookDropTarget {
   placement: 'before' | 'after' | 'inside';
 }
 
+interface SectionDropTarget {
+  sectionId: string;
+  placement: 'before' | 'after';
+}
+
 type TabType = 'recordings' | 'books' | 'notes' | 'students';
 
 const memberRoleStyles: Record<ClassRole, { label: string; className: string }> = {
@@ -218,13 +223,6 @@ function compareBooks(a: Book, b: Book) {
   return a.position - b.position || new Date(a.uploaded_at).getTime() - new Date(b.uploaded_at).getTime();
 }
 
-function moveItem<T>(items: T[], currentIndex: number, targetIndex: number) {
-  const next = [...items];
-  const [item] = next.splice(currentIndex, 1);
-  next.splice(targetIndex, 0, item);
-  return next;
-}
-
 export default function ClassPage() {
   const auth = useAuth();
   const router = useRouter();
@@ -251,11 +249,17 @@ export default function ClassPage() {
   const [memberError, setMemberError] = useState<string | null>(null);
   const [addingMember, setAddingMember] = useState(false);
   const [updatingMemberId, setUpdatingMemberId] = useState<string | null>(null);
+  const [memberMenu, setMemberMenu] = useState<{ memberId: string; top: number; left: number } | null>(null);
+  const [transferOwnershipTarget, setTransferOwnershipTarget] = useState<ClassMember | null>(null);
+  const [transferOwnershipEmail, setTransferOwnershipEmail] = useState('');
+  const [transferOwnershipError, setTransferOwnershipError] = useState<string | null>(null);
 
   const [newSectionTitle, setNewSectionTitle] = useState('');
   const [creatingSection, setCreatingSection] = useState(false);
   const [editingSectionId, setEditingSectionId] = useState<string | null>(null);
   const [sectionTitleDraft, setSectionTitleDraft] = useState('');
+  const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
+  const [sectionDropTarget, setSectionDropTarget] = useState<SectionDropTarget | null>(null);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [bookTitleDraft, setBookTitleDraft] = useState('');
   const [deletingRecordingId, setDeletingRecordingId] = useState<string | null>(null);
@@ -264,6 +268,7 @@ export default function ClassPage() {
   const [bookDropTarget, setBookDropTarget] = useState<BookDropTarget | null>(null);
   const accessTokenRef = useRef<string | null>(null);
   const draggedBookRef = useRef<DraggedBook | null>(null);
+  const memberMenuRef = useRef<HTMLDivElement | null>(null);
   const noteContentRef = useRef('');
   const currentNoteContentRef = useRef('');
   const classIdRef = useRef<string | null>(null);
@@ -408,6 +413,47 @@ export default function ClassPage() {
   }, [canEditClass]);
 
   useEffect(() => {
+    if (!memberMenu) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target) return;
+
+      if (memberMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      if (target.closest(`[data-member-menu-trigger="${memberMenu.memberId}"]`)) {
+        return;
+      }
+
+      setMemberMenu(null);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMemberMenu(null);
+      }
+    };
+
+    const closeMenu = () => {
+      setMemberMenu(null);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [memberMenu]);
+
+  useEffect(() => {
     const loadNote = async () => {
       if (!classData || activeTab !== 'notes') return;
 
@@ -545,6 +591,7 @@ export default function ClassPage() {
   const handleRemoveMember = async (member: ClassMember) => {
     if (!classData || !canEditClass) return;
 
+    setMemberMenu(null);
     const confirmed = window.confirm(`Remove ${member.email} from this class?`);
     if (!confirmed) return;
 
@@ -576,6 +623,7 @@ export default function ClassPage() {
     if (!classData || !isOwner) return;
 
     try {
+      setMemberMenu(null);
       setUpdatingMemberId(member.user_id);
       setMemberError(null);
 
@@ -597,27 +645,34 @@ export default function ClassPage() {
     }
   };
 
-  const handleTransferOwnership = async (member: ClassMember) => {
+  const handleTransferOwnership = async () => {
+    if (!classData || !isOwner || !transferOwnershipTarget) return;
+
+    if (transferOwnershipEmail.trim().toLowerCase() !== transferOwnershipTarget.email.trim().toLowerCase()) {
+      setTransferOwnershipError('Email confirmation does not match the selected member.');
+      return;
+    }
+
     if (!classData || !isOwner) return;
 
-    const confirmed = window.confirm(`Transfer ownership of this class to ${member.email}? You will become a manager.`);
-    if (!confirmed) return;
-
     try {
-      setUpdatingMemberId(member.user_id);
+      setUpdatingMemberId(transferOwnershipTarget.user_id);
       setMemberError(null);
+      setTransferOwnershipError(null);
 
       const { error } = await supabase.rpc('transfer_class_ownership', {
         target_class_id: classData.id,
-        target_user_id: member.user_id,
+        target_user_id: transferOwnershipTarget.user_id,
       });
 
       if (error) throw error;
 
       setClassData((currentClass) => (
-        currentClass ? { ...currentClass, user_id: member.user_id } : currentClass
+        currentClass ? { ...currentClass, user_id: transferOwnershipTarget.user_id } : currentClass
       ));
       setClassRole('manager');
+      setTransferOwnershipTarget(null);
+      setTransferOwnershipEmail('');
       await loadMembers();
     } catch (error: unknown) {
       const message = getErrorMessage(error, 'Failed to transfer ownership');
@@ -626,6 +681,20 @@ export default function ClassPage() {
     } finally {
       setUpdatingMemberId(null);
     }
+  };
+
+  const openTransferOwnershipDialog = (member: ClassMember) => {
+    setMemberMenu(null);
+    setTransferOwnershipTarget(member);
+    setTransferOwnershipEmail('');
+    setTransferOwnershipError(null);
+  };
+
+  const closeTransferOwnershipDialog = () => {
+    if (updatingMemberId && transferOwnershipTarget?.user_id === updatingMemberId) return;
+    setTransferOwnershipTarget(null);
+    setTransferOwnershipEmail('');
+    setTransferOwnershipError(null);
   };
 
   const handleCreateSection = async () => {
@@ -655,6 +724,11 @@ export default function ClassPage() {
   };
 
   const persistSectionOrder = async (orderedSections: BookSection[]) => {
+    setBookSections(orderedSections.map((section, index) => ({
+      ...section,
+      position: index,
+    })));
+
     await Promise.all(
       orderedSections.map(async (section, index) => {
         if (section.position === index) return;
@@ -671,19 +745,40 @@ export default function ClassPage() {
     await loadBookSections();
   };
 
-  const handleMoveSection = async (sectionId: string, direction: 'up' | 'down') => {
-    const orderedSections = [...bookSections].sort(compareSections);
-    const currentIndex = orderedSections.findIndex((section) => section.id === sectionId);
-    if (currentIndex < 0) return;
+  const handleDropSection = async (targetSectionId: string, placement: 'before' | 'after') => {
+    if (!draggedSectionId || draggedSectionId === targetSectionId) return;
 
-    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    if (targetIndex < 0 || targetIndex >= orderedSections.length) return;
+    const orderedSections = [...bookSections].sort(compareSections);
+    const sourceIndex = orderedSections.findIndex((section) => section.id === draggedSectionId);
+    const targetIndexBase = orderedSections.findIndex((section) => section.id === targetSectionId);
+    if (sourceIndex < 0 || targetIndexBase < 0) {
+      setDraggedSectionId(null);
+      setSectionDropTarget(null);
+      return;
+    }
+
+    const nextSections = [...orderedSections];
+    const [draggedSection] = nextSections.splice(sourceIndex, 1);
+
+    let insertIndex = targetIndexBase;
+    if (sourceIndex < targetIndexBase) {
+      insertIndex -= 1;
+    }
+    if (placement === 'after') {
+      insertIndex += 1;
+    }
+
+    nextSections.splice(Math.max(0, insertIndex), 0, draggedSection);
 
     try {
-      await persistSectionOrder(moveItem(orderedSections, currentIndex, targetIndex));
+      await persistSectionOrder(nextSections);
     } catch (error) {
-      console.error('Error moving section:', error);
+      console.error('Error reordering section:', error);
+      await loadBookSections();
       alert(getErrorMessage(error, 'Failed to reorder section'));
+    } finally {
+      setDraggedSectionId(null);
+      setSectionDropTarget(null);
     }
   };
 
@@ -700,7 +795,11 @@ export default function ClassPage() {
 
       setEditingSectionId(null);
       setSectionTitleDraft('');
-      await loadBookSections();
+      setBookSections((currentSections) =>
+        currentSections.map((section) =>
+          section.id === editingSectionId ? { ...section, title: sectionTitleDraft.trim() } : section
+        )
+      );
     } catch (error) {
       console.error('Error renaming section:', error);
       alert(getErrorMessage(error, 'Failed to rename section'));
@@ -1076,6 +1175,12 @@ export default function ClassPage() {
     books: books.filter((book) => book.section_id === section.id).sort(compareBooks),
   }));
   const unassignedBooks = books.filter((book) => book.section_id === null).sort(compareBooks);
+  const activeMemberMenuMember = memberMenu
+    ? members.find((member) => member.user_id === memberMenu.memberId) ?? null
+    : null;
+  const renderSectionDropIndicator = () => (
+    <div className="my-3 h-2 rounded-full bg-blue-500/90 shadow-sm" aria-hidden="true" />
+  );
   const renderDropIndicator = (compact = false) => (
     <div
       className={`rounded-full bg-blue-500/90 shadow-sm transition-all ${compact ? 'my-1 h-1.5' : 'my-2 h-2'}`}
@@ -1511,45 +1616,94 @@ export default function ClassPage() {
                   </div>
                 ) : (
                   <div className="space-y-6">
-                    {organizedSections.map((section, sectionIndex) => (
-                      <section key={section.id} className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+                    {organizedSections.map((section) => (
+                      <div key={section.id}>
+                        {sectionDropTarget?.sectionId === section.id && sectionDropTarget.placement === 'before' && renderSectionDropIndicator()}
+                      <section
+                        draggable={canEditClass}
+                        onDragStart={(event) => {
+                          if (!canEditClass) return;
+                          setDraggedSectionId(section.id);
+                          setSectionDropTarget({ sectionId: section.id, placement: 'before' });
+                          event.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onDragEnd={() => {
+                          setDraggedSectionId(null);
+                          setSectionDropTarget(null);
+                        }}
+                        onDragOver={(event) => {
+                          if (!canEditClass || !draggedSectionId || draggedSectionId === section.id) return;
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = 'move';
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+                          setSectionDropTarget({ sectionId: section.id, placement });
+                        }}
+                        onDrop={(event) => {
+                          if (!canEditClass || !draggedSectionId || draggedSectionId === section.id) return;
+                          event.preventDefault();
+                          const rect = event.currentTarget.getBoundingClientRect();
+                          const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+                          void handleDropSection(section.id, placement);
+                        }}
+                        className={`overflow-hidden rounded-xl border bg-white shadow-sm transition-all ${draggedSectionId === section.id ? 'opacity-60' : 'opacity-100'} ${sectionDropTarget?.sectionId === section.id ? 'border-blue-300 shadow-md' : 'border-gray-200'} ${canEditClass ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                      >
                         <div className="border-b bg-gray-50 px-5 py-4">
                           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                             <div className="min-w-0">
                               <div className="flex items-center gap-3">
-                                <span className="inline-flex rounded-full bg-gray-900 px-2.5 py-1 text-xs font-semibold text-white">
-                                  Section {sectionIndex + 1}
-                                </span>
+                                {canEditClass && (
+                                  <div className="text-gray-400">
+                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h.01M8 12h.01M8 17h.01M16 7h.01M16 12h.01M16 17h.01" />
+                                    </svg>
+                                  </div>
+                                )}
                                 {editingSectionId === section.id ? (
-                                  <div className="flex items-center gap-2">
-                                    <input
-                                      value={sectionTitleDraft}
-                                      onChange={(e) => setSectionTitleDraft(e.target.value)}
-                                      className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                    />
-                                    <button
-                                      onClick={handleRenameSection}
-                                      className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-                                    >
-                                      Save
-                                    </button>
-                                    <button
-                                      onClick={() => {
+                                  <input
+                                    value={sectionTitleDraft}
+                                    onChange={(e) => setSectionTitleDraft(e.target.value)}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter') {
+                                        event.preventDefault();
+                                        void handleRenameSection();
+                                      }
+                                      if (event.key === 'Escape') {
                                         setEditingSectionId(null);
                                         setSectionTitleDraft('');
-                                      }}
-                                      className="rounded-md bg-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-300"
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      if (!sectionTitleDraft.trim()) {
+                                        setEditingSectionId(null);
+                                        setSectionTitleDraft('');
+                                        return;
+                                      }
+                                      void handleRenameSection();
+                                    }}
+                                    autoFocus
+                                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
                                 ) : (
-                                  <h4 className="truncate text-lg font-semibold text-gray-900">{section.title}</h4>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!canEditClass) return;
+                                      setEditingSectionId(section.id);
+                                      setSectionTitleDraft(section.title);
+                                    }}
+                                    className={`group inline-flex items-center gap-2 truncate text-left text-lg font-semibold text-gray-900 ${canEditClass ? 'hover:text-gray-900' : ''}`}
+                                  >
+                                    <span className="truncate">{section.title}</span>
+                                    {canEditClass && (
+                                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 opacity-0 transition-opacity group-hover:opacity-100">
+                                        Click to edit
+                                      </span>
+                                    )}
+                                  </button>
                                 )}
                               </div>
-                              <p className="mt-2 text-sm text-gray-600">
-                                {section.books.length} book{section.books.length === 1 ? '' : 's'}
-                              </p>
                             </div>
 
                             {canEditClass && (
@@ -1563,29 +1717,6 @@ export default function ClassPage() {
                                 >
                                   Add Books
                                 </button>
-                                <button
-                                  onClick={() => {
-                                    setEditingSectionId(section.id);
-                                    setSectionTitleDraft(section.title);
-                                  }}
-                                  className="rounded-md bg-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300"
-                                >
-                                  Rename
-                                </button>
-                                <button
-                                  onClick={() => void handleMoveSection(section.id, 'up')}
-                                  disabled={sectionIndex === 0}
-                                  className="rounded-md bg-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                                >
-                                  Up
-                                </button>
-                                <button
-                                  onClick={() => void handleMoveSection(section.id, 'down')}
-                                  disabled={sectionIndex === orderedSections.length - 1}
-                                  className="rounded-md bg-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                                >
-                                  Down
-                                </button>
                               </div>
                             )}
                           </div>
@@ -1595,6 +1726,8 @@ export default function ClassPage() {
                           {renderBookCards(section.id, section.books)}
                         </div>
                       </section>
+                        {sectionDropTarget?.sectionId === section.id && sectionDropTarget.placement === 'after' && renderSectionDropIndicator()}
+                      </div>
                     ))}
 
                     {unassignedBooks.length > 0 && (
@@ -1724,6 +1857,7 @@ export default function ClassPage() {
                             const canDemoteMember = isOwner && member.role === 'manager';
                             const canTransferToMember = isOwner && member.role !== 'owner';
                             const isBusy = updatingMemberId === member.user_id;
+                            const hasActions = canPromoteMember || canDemoteMember || canTransferToMember || canRemoveMember;
 
                             return (
                               <tr key={member.user_id} className="hover:bg-gray-50">
@@ -1739,47 +1873,34 @@ export default function ClassPage() {
                                 </td>
                                 <td className="px-4 py-4 text-sm text-gray-600">{formatDate(member.created_at)}</td>
                                 <td className="px-4 py-4 text-right">
-                                  <div className="flex flex-wrap items-center justify-end gap-2">
-                                    {canPromoteMember && (
+                                  {hasActions ? (
+                                    <div className="inline-flex justify-end">
                                       <button
-                                        onClick={() => void handleChangeMemberRole(member, 'manager')}
+                                        onClick={(event) => {
+                                          const rect = event.currentTarget.getBoundingClientRect();
+                                          const menuWidth = 192;
+                                          const menuLeft = Math.min(window.innerWidth - menuWidth - 16, Math.max(16, rect.right - menuWidth));
+                                          const menuTop = Math.min(window.innerHeight - 16, rect.bottom + 8);
+
+                                          setMemberMenu((current) => (
+                                            current?.memberId === member.user_id
+                                              ? null
+                                              : { memberId: member.user_id, top: menuTop, left: menuLeft }
+                                          ));
+                                        }}
+                                        data-member-menu-trigger={member.user_id}
                                         disabled={isBusy}
-                                        className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-md border border-gray-300 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        aria-label={`Open actions for ${member.email}`}
                                       >
-                                        {isBusy ? 'Updating...' : 'Make Manager'}
+                                        <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                                          <path d="M10 6a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 5.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 5.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+                                        </svg>
                                       </button>
-                                    )}
-                                    {canDemoteMember && (
-                                      <button
-                                        onClick={() => void handleChangeMemberRole(member, 'student')}
-                                        disabled={isBusy}
-                                        className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-50"
-                                      >
-                                        {isBusy ? 'Updating...' : 'Make Student'}
-                                      </button>
-                                    )}
-                                    {canTransferToMember && (
-                                      <button
-                                        onClick={() => void handleTransferOwnership(member)}
-                                        disabled={isBusy}
-                                        className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
-                                      >
-                                        {isBusy ? 'Updating...' : 'Transfer Ownership'}
-                                      </button>
-                                    )}
-                                    {canRemoveMember && (
-                                      <button
-                                        onClick={() => void handleRemoveMember(member)}
-                                        disabled={isBusy}
-                                        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                                      >
-                                        {isBusy ? 'Updating...' : 'Remove'}
-                                      </button>
-                                    )}
-                                    {!canPromoteMember && !canDemoteMember && !canTransferToMember && !canRemoveMember && (
-                                      <span className="text-xs text-gray-400">No actions</span>
-                                    )}
-                                  </div>
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">No actions</span>
+                                  )}
                                 </td>
                               </tr>
                             );
@@ -1804,6 +1925,112 @@ export default function ClassPage() {
           onClose={() => setBookUploadTarget(null)}
           onSuccess={handleBookUploadSuccess}
         />
+      )}
+
+      {memberMenu && activeMemberMenuMember && (
+        <div
+          ref={memberMenuRef}
+          className="fixed z-50 min-w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-xl"
+          style={{ top: memberMenu.top, left: memberMenu.left }}
+        >
+          {isOwner && activeMemberMenuMember.role === 'student' && (
+            <button
+              onClick={() => void handleChangeMemberRole(activeMemberMenuMember, 'manager')}
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+            >
+              Make Manager
+            </button>
+          )}
+          {isOwner && activeMemberMenuMember.role === 'manager' && (
+            <button
+              onClick={() => void handleChangeMemberRole(activeMemberMenuMember, 'student')}
+              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+            >
+              Make Student
+            </button>
+          )}
+          {isOwner && activeMemberMenuMember.role !== 'owner' && (
+            <button
+              onClick={() => openTransferOwnershipDialog(activeMemberMenuMember)}
+              className="block w-full px-4 py-2 text-left text-sm text-amber-700 hover:bg-amber-50"
+            >
+              Transfer Ownership
+            </button>
+          )}
+          {(activeMemberMenuMember.role === 'student' || (isOwner && activeMemberMenuMember.role === 'manager')) && (
+            <button
+              onClick={() => void handleRemoveMember(activeMemberMenuMember)}
+              className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      )}
+
+      {transferOwnershipTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 px-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h4 className="text-lg font-semibold text-gray-900">Transfer Ownership</h4>
+                <p className="mt-2 text-sm text-gray-600">
+                  Type <span className="font-medium text-gray-900">{transferOwnershipTarget.email}</span> to confirm transferring ownership.
+                  You will become a manager after this change.
+                </p>
+              </div>
+              <button
+                onClick={closeTransferOwnershipDialog}
+                disabled={updatingMemberId === transferOwnershipTarget.user_id}
+                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+                aria-label="Close transfer ownership dialog"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="mt-5">
+              <label htmlFor="transfer-ownership-email" className="block text-sm font-medium text-gray-700">
+                Confirm with email
+              </label>
+              <input
+                id="transfer-ownership-email"
+                type="email"
+                value={transferOwnershipEmail}
+                onChange={(event) => {
+                  setTransferOwnershipEmail(event.target.value);
+                  if (transferOwnershipError) {
+                    setTransferOwnershipError(null);
+                  }
+                }}
+                placeholder={transferOwnershipTarget.email}
+                className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              {transferOwnershipError && (
+                <p className="mt-2 text-sm text-red-600">{transferOwnershipError}</p>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={closeTransferOwnershipDialog}
+                disabled={updatingMemberId === transferOwnershipTarget.user_id}
+                className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleTransferOwnership()}
+                disabled={updatingMemberId === transferOwnershipTarget.user_id}
+                className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {updatingMemberId === transferOwnershipTarget.user_id ? 'Transferring...' : 'Transfer Ownership'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {classData && videoUploadModalOpen && (
