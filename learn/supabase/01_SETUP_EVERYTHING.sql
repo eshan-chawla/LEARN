@@ -530,7 +530,7 @@ COMMENT ON COLUMN user_class.can_edit IS 'TRUE means the user can edit class con
 COMMENT ON COLUMN classes.slug IS 'URL-friendly slug for the class';
 COMMENT ON COLUMN books.processing_status IS 'Status of PDF processing: pending, processing, completed, or failed';
 COMMENT ON COLUMN books.error_message IS 'Error details if processing_status is failed';
-COMMENT ON COLUMN books.storage_path IS 'S3 key for the PDF (e.g., books/user-id/file.pdf)';
+COMMENT ON COLUMN books.storage_path IS 'S3 key for the PDF (e.g., books/class-id/file.pdf)';
 COMMENT ON FUNCTION list_class_viewers(UUID) IS 'Returns view-only class members for editors of that class';
 COMMENT ON FUNCTION add_user_to_class_by_email(UUID, TEXT, BOOLEAN) IS 'Adds an existing user to a class by email for editors of that class';
 

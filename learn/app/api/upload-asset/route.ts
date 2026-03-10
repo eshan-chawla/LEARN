@@ -14,11 +14,11 @@ const BUCKET_NAME = process.env.AWS_S3_RECORDINGS_BUCKET!;
 
 export async function POST(req: Request) {
     try {
-        const { filename, contentType, userId, type } = await req.json();
+        const { filename, contentType, classId, type } = await req.json();
 
-        if (!filename || !contentType || !userId || !type) {
+        if (!filename || !contentType || !classId || !type) {
             return NextResponse.json(
-                { error: 'filename, contentType, userId, and type are required' },
+                { error: 'filename, contentType, classId, and type are required' },
                 { status: 400 }
             );
         }
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
         const timestamp = Date.now();
         const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
         const folder = type === 'pdf' ? 'books' : 'videos';
-        const key = `${folder}/${userId}/${timestamp}_${sanitized}`;
+        const key = `${folder}/${classId}/${timestamp}_${sanitized}`;
 
         const command = new PutObjectCommand({
             Bucket: BUCKET_NAME,
@@ -48,8 +48,9 @@ export async function POST(req: Request) {
         const publicUrl = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
 
         return NextResponse.json({ presignedUrl, publicUrl, storagePath: key });
-    } catch (error: any) {
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : 'Failed to generate presigned URL';
         console.error('Error generating presigned URL:', error);
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: message }, { status: 500 });
     }
 }

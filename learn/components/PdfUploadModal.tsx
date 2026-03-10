@@ -5,13 +5,12 @@ import { supabase } from '@/lib/supabase';
 
 interface PdfUploadModalProps {
   classId: string;
-  userId: string;
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: PdfUploadModalProps) {
+export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploadModalProps) {
   const [title, setTitle] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -73,7 +72,7 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
         body: JSON.stringify({
           filename: file.name,
           contentType: file.type,
-          userId,
+          classId,
           type: 'pdf',
         }),
       });
@@ -141,9 +140,10 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
         handleClose();
       }, 500);
 
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to upload PDF';
       console.error('Upload error:', err);
-      setError(err.message || 'Failed to upload PDF');
+      setError(message);
       setUploadProgress(0);
     } finally {
       setUploading(false);

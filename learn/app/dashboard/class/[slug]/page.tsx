@@ -889,7 +889,6 @@ export default function ClassPage() {
       {classData && auth.user && (
         <PdfUploadModal
           classId={classData.id}
-          userId={auth.user.id}
           isOpen={uploadModalOpen}
           onClose={() => setUploadModalOpen(false)}
           onSuccess={handleUploadSuccess}
@@ -900,7 +899,6 @@ export default function ClassPage() {
       {classData && auth.user && (
         <VideoUploadModal
           classId={classData.id}
-          userId={auth.user.id}
           isOpen={videoUploadModalOpen}
           onClose={() => setVideoUploadModalOpen(false)}
           onSuccess={handleVideoUploadSuccess}
