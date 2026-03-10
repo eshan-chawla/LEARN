@@ -520,42 +520,58 @@ export default function ClassPage() {
                     <p className="text-gray-500">No books yet. Add your first book!</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {books.map((book) => (
-                      <div key={book.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                        <div className="flex items-start gap-3">
-                          <div className="flex-shrink-0">
-                            <svg className="w-10 h-10 text-red-600" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                            </svg>
-                          </div>
-                          <div className="flex-1">
-                            <div className="flex items-center justify-between mb-1">
-                              <h4 className="font-medium text-gray-900">{book.title}</h4>
-                            </div>
-                            <ProcessingStatusBadge
-                              bookId={book.id}
-                              initialStatus={book.processing_status}
-                              onStatusChange={(status) => {
-                                // Update book status in local state
-                                setBooks(books.map(b =>
-                                  b.id === book.id ? { ...b, processing_status: status } : b
-                                ));
-                              }}
-                            />
-                            <p className="text-xs text-gray-500 mt-2 mb-2">
-                              Uploaded: {formatDate(book.uploaded_at)}
-                            </p>
-                            <Link
-                              href={`/dashboard/class/${slug}/book/${book.id}`}
-                              className="text-sm text-blue-600 hover:text-blue-700 font-medium"
-                            >
-                              Open Book →
-                            </Link>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="overflow-hidden rounded-lg border border-gray-200">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Title
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Status
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Uploaded
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Action
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 bg-white">
+                          {books.map((book) => (
+                            <tr key={book.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                                {book.title}
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-600">
+                                <ProcessingStatusBadge
+                                  bookId={book.id}
+                                  initialStatus={book.processing_status}
+                                  onStatusChange={(status) => {
+                                    setBooks(books.map(b =>
+                                      b.id === book.id ? { ...b, processing_status: status } : b
+                                    ));
+                                  }}
+                                />
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-600">
+                                {formatDate(book.uploaded_at)}
+                              </td>
+                              <td className="px-4 py-4 text-right">
+                                <Link
+                                  href={`/dashboard/class/${slug}/book/${book.id}`}
+                                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                                >
+                                  Open
+                                </Link>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
