@@ -1,8 +1,20 @@
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+
+const s3 = new S3Client({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+  },
+});
+
+const BUCKET_NAME = process.env.AWS_S3_RECORDINGS_BUCKET!;
 
 export async function GET(
   request: NextRequest,
@@ -11,26 +23,18 @@ export async function GET(
   try {
     const { bookId } = await params;
 
-    // Get user from authorization header (set by middleware/client)
+    // Authenticate via Authorization header
     const authHeader = request.headers.get('authorization');
     if (!authHeader) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Create Supabase client with user's token
     const token = authHeader.replace('Bearer ', '');
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-      global: {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      },
+      global: { headers: { Authorization: `Bearer ${token}` } },
     });
 
-    // Fetch book with its class to verify ownership
+    // Fetch book + class info (RLS enforces ownership)
     const { data: book, error: bookError } = await supabase
       .from('books')
       .select(`
@@ -46,43 +50,26 @@ export async function GET(
       .single();
 
     if (bookError || !book) {
-      return NextResponse.json(
-        { error: 'Book not found' },
-        { status: 404 }
-      );
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Verify user owns the class (RLS should handle this, but double-check)
+    // Double-check ownership
     const { data: { user } } = await supabase.auth.getUser();
-
     if (!user || (book.classes as any).user_id !== user.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized to access this book' },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: 'Unauthorized to access this book' }, { status: 403 });
     }
 
-    // Generate signed URL for the PDF (1 hour expiry)
     if (!book.storage_path) {
-      return NextResponse.json(
-        { error: 'Book has no storage path' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Book has no storage path' }, { status: 400 });
     }
 
-    const { data: signedData, error: signedError } = await supabase.storage
-      .from('books')
-      .createSignedUrl(book.storage_path, 3600); // 1 hour
+    // Generate a time-limited S3 pre-signed GET URL (1 hour)
+    const command = new GetObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: book.storage_path,
+    });
+    const pdfUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
 
-    if (signedError || !signedData) {
-      console.error('Error creating signed URL:', signedError);
-      return NextResponse.json(
-        { error: 'Failed to generate PDF URL' },
-        { status: 500 }
-      );
-    }
-
-    // Return book data with signed URL
     return NextResponse.json({
       book: {
         id: book.id,
@@ -92,8 +79,8 @@ export async function GET(
         storage_path: book.storage_path,
         uploaded_at: book.uploaded_at,
       },
-      pdfUrl: signedData.signedUrl,
-      expiresAt: new Date(Date.now() + 3600000).toISOString(), // 1 hour from now
+      pdfUrl,
+      expiresAt: new Date(Date.now() + 3600000).toISOString(),
       className: (book.classes as any).name,
       classSlug: (book.classes as any).slug,
     });

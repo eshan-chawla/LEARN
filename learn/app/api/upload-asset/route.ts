@@ -14,18 +14,26 @@ const BUCKET_NAME = process.env.AWS_S3_RECORDINGS_BUCKET!;
 
 export async function POST(req: Request) {
     try {
-        const { filename, contentType, classId } = await req.json();
+        const { filename, contentType, userId, type } = await req.json();
 
-        if (!filename || !contentType || !classId) {
+        if (!filename || !contentType || !userId || !type) {
             return NextResponse.json(
-                { error: 'filename, contentType, and classId are required' },
+                { error: 'filename, contentType, userId, and type are required' },
+                { status: 400 }
+            );
+        }
+
+        if (type !== 'video' && type !== 'pdf') {
+            return NextResponse.json(
+                { error: 'type must be "video" or "pdf"' },
                 { status: 400 }
             );
         }
 
         const timestamp = Date.now();
         const sanitized = filename.replace(/[^a-zA-Z0-9.-]/g, '_');
-        const key = `${classId}/${timestamp}_${sanitized}`;
+        const folder = type === 'pdf' ? 'books' : 'videos';
+        const key = `${folder}/${userId}/${timestamp}_${sanitized}`;
 
         const command = new PutObjectCommand({
             Bucket: BUCKET_NAME,
@@ -33,11 +41,11 @@ export async function POST(req: Request) {
             ContentType: contentType,
         });
 
-        // Pre-signed URL is valid for 15 minutes — enough for large video uploads
+        // Pre-signed URL valid for 15 minutes — enough for large uploads
         const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 900 });
 
-        // The public URL viewers will use to play the video
-        const publicUrl = `https://${BUCKET_NAME}.s3.us-east-1.amazonaws.com/${key}`;
+        // Public URL to access the asset after upload
+        const publicUrl = `https://${BUCKET_NAME}.s3.${process.env.AWS_REGION || 'us-east-1'}.amazonaws.com/${key}`;
 
         return NextResponse.json({ presignedUrl, publicUrl, storagePath: key });
     } catch (error: any) {

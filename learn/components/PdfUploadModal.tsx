@@ -23,26 +23,23 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      // Validate file type
       if (selectedFile.type !== 'application/pdf') {
         setError('Please select a PDF file');
         return;
       }
 
-      // Validate file size (50 MB limit)
-      const maxSize = 50 * 1024 * 1024; // 50 MB
+      // 500 MB limit — uploads go to S3, not Supabase
+      const maxSize = 500 * 1024 * 1024;
       if (selectedFile.size > maxSize) {
-        setError('File size must be less than 50 MB');
+        setError(`File size must be less than 500 MB (your file is ${(selectedFile.size / 1024 / 1024).toFixed(0)} MB)`);
         return;
       }
 
       setFile(selectedFile);
       setError('');
 
-      // Auto-fill title from filename if empty
       if (!title) {
-        const filename = selectedFile.name.replace('.pdf', '');
-        setTitle(filename);
+        setTitle(selectedFile.name.replace('.pdf', ''));
       }
     }
   };
@@ -56,54 +53,78 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
     try {
       setUploading(true);
       setError('');
+      setUploadProgress(5);
+
+      // Verify active Supabase session
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData?.session?.user) {
+        setError('Your session has expired. Please sign out and sign back in.');
+        setUploading(false);
+        setUploadProgress(0);
+        return;
+      }
+
       setUploadProgress(10);
 
-      // Generate unique filename
-      const timestamp = Date.now();
-      const sanitizedFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-      const storagePath = `${userId}/${timestamp}_${sanitizedFilename}`;
+      // Step 1: Get a pre-signed S3 PUT URL from our API
+      const presignRes = await fetch('/api/upload-asset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type,
+          userId,
+          type: 'pdf',
+        }),
+      });
+
+      if (!presignRes.ok) {
+        const err = await presignRes.json();
+        throw new Error(err.error || 'Failed to get upload URL');
+      }
+
+      const { presignedUrl, publicUrl, storagePath } = await presignRes.json();
 
       setUploadProgress(30);
 
-      // Upload file to Supabase Storage
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('books')
-        .upload(storagePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
+      // Step 2: Upload directly to S3 (bypasses Supabase 50 MB limit entirely)
+      const s3Res = await fetch(presignedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
 
-      if (uploadError) throw uploadError;
+      if (!s3Res.ok) {
+        throw new Error(`S3 upload failed: ${s3Res.status} ${s3Res.statusText}`);
+      }
 
-      setUploadProgress(60);
+      setUploadProgress(70);
 
-      // Create book record in database (store storage_path, not URL)
+      // Step 3: Save book record to Supabase with the S3 public URL
       const { data: bookData, error: bookError } = await supabase
         .from('books')
         .insert({
           class_id: classId,
           title: title.trim(),
-          pdf_url: storagePath, // Store the storage path instead of URL
+          pdf_url: publicUrl,
           storage_path: storagePath,
           file_size: file.size,
-          processing_status: 'pending'
+          processing_status: 'pending',
         })
         .select()
         .single();
 
-      setUploadProgress(80);
-
       if (bookError) throw bookError;
 
-      setUploadProgress(90);
+      setUploadProgress(85);
 
-      // Create processing job
+      // Step 4: Create a PDF processing job for Lambda/embeddings
       const { data: jobData, error: jobError } = await supabase
         .from('pdf_processing_jobs')
         .insert({
           book_id: bookData.id,
           status: 'pending',
-          progress: 0
+          progress: 0,
         })
         .select()
         .single();
@@ -112,27 +133,24 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
 
       setUploadProgress(95);
 
-      // Trigger Lambda processing via API route
-      const response = await fetch('/api/process-pdf', {
+      // Step 5: Trigger Lambda to process the PDF
+      const processRes = await fetch('/api/process-pdf', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           book_id: bookData.id,
           job_id: jobData.id,
-          storage_path: storagePath
-        })
+          storage_path: storagePath,
+        }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to start PDF processing');
+      if (!processRes.ok) {
+        // Non-fatal: log but don't fail the upload
+        console.warn('PDF processing trigger failed:', await processRes.json());
       }
 
       setUploadProgress(100);
 
-      // Success!
       setTimeout(() => {
         onSuccess();
         handleClose();
@@ -176,14 +194,14 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
 
         {/* Body */}
         <div className="px-6 py-4 space-y-4">
-          {/* Title Input */}
+          {/* Title */}
           <div>
-            <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
+            <label htmlFor="pdf-title" className="block text-sm font-medium text-gray-700 mb-1">
               Book Title
             </label>
             <input
               type="text"
-              id="title"
+              id="pdf-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g., Introduction to Python"
@@ -192,14 +210,14 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
             />
           </div>
 
-          {/* File Input */}
+          {/* File picker */}
           <div>
-            <label htmlFor="file" className="block text-sm font-medium text-gray-700 mb-1">
-              PDF File
+            <label htmlFor="pdf-file" className="block text-sm font-medium text-gray-700 mb-1">
+              PDF File (up to 500 MB)
             </label>
             <input
               type="file"
-              id="file"
+              id="pdf-file"
               accept="application/pdf"
               onChange={handleFileChange}
               disabled={uploading}
@@ -212,11 +230,11 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
             )}
           </div>
 
-          {/* Upload Progress */}
+          {/* Progress bar */}
           {uploading && (
             <div>
               <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
-                <span>Uploading...</span>
+                <span>Uploading to S3...</span>
                 <span>{uploadProgress}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -228,17 +246,17 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
             </div>
           )}
 
-          {/* Error Message */}
+          {/* Error */}
           {error && (
             <div className="bg-red-50 border border-red-200 rounded-md p-3">
               <p className="text-sm text-red-600">{error}</p>
             </div>
           )}
 
-          {/* Info Message */}
+          {/* Info */}
           <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
             <p className="text-sm text-blue-700">
-              The PDF will be processed to generate embeddings for search and Q&A. This may take a few minutes.
+              The PDF will be stored in AWS S3 and processed to generate embeddings for search and Q&A.
             </p>
           </div>
         </div>

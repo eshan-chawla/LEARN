@@ -73,13 +73,14 @@ export function VideoUploadModal({ classId, userId, isOpen, onClose, onSuccess }
       setUploadProgress(20);
 
       // Step 1: Get a pre-signed S3 URL from our API route
-      const presignRes = await fetch('/api/upload-video', {
+      const presignRes = await fetch('/api/upload-asset', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           filename: file.name,
           contentType: file.type,
-          classId,
+          userId,
+          type: 'video',
         }),
       });
 
