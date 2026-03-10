@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import Link from 'next/link';
 
@@ -35,6 +35,8 @@ export default function BookViewerPage() {
   const [bookResponse, setBookResponse] = useState<BookResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [viewerUrl, setViewerUrl] = useState<string>('');
+  const loadingRef = useRef(false);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -43,7 +45,7 @@ export default function BookViewerPage() {
     }
   }, [auth.loading, auth.user, router]);
 
-  // Load book data
+  // Load book data (only once)
   useEffect(() => {
     if (auth.user && bookId) {
       loadBook();
@@ -52,6 +54,10 @@ export default function BookViewerPage() {
 
 
   const loadBook = async () => {
+    // Prevent duplicate calls (React Strict Mode double-mount)
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+
     try {
       setLoading(true);
       setError(null);
@@ -98,6 +104,18 @@ export default function BookViewerPage() {
       }
 
       setBookResponse(data);
+
+      // Set viewer URL only once when book loads
+      const proxyUrl = `/api/proxy-pdf?url=${encodeURIComponent(data.pdfUrl)}`;
+      const encodedProxyUrl = encodeURIComponent(proxyUrl);
+      const pageParam = searchParams?.get('page');
+
+      if (pageParam) {
+        setViewerUrl(`/pdfjs/web/viewer.html?file=${encodedProxyUrl}#page=${pageParam}`);
+      } else {
+        setViewerUrl(`/pdfjs/web/viewer.html?file=${encodedProxyUrl}`);
+      }
+
       setLoading(false);
     } catch (err: any) {
       console.error('Error loading book:', err);
@@ -106,19 +124,6 @@ export default function BookViewerPage() {
     }
   };
 
-  const getPdfJsViewerUrl = () => {
-    if (!bookResponse) return '';
-
-    // Use proxy to avoid CORS issues with Supabase signed URLs
-    const proxyUrl = `/api/proxy-pdf?url=${encodeURIComponent(bookResponse.pdfUrl)}`;
-    const encodedProxyUrl = encodeURIComponent(proxyUrl);
-    const pageParam = searchParams?.get('page');
-
-    if (pageParam) {
-      return `/pdfjs/web/viewer.html?file=${encodedProxyUrl}#page=${pageParam}`;
-    }
-    return `/pdfjs/web/viewer.html?file=${encodedProxyUrl}`;
-  };
 
   const handleSignOut = async () => {
     try {
@@ -212,11 +217,14 @@ export default function BookViewerPage() {
 
       {/* PDF.js Viewer (Standard viewer used by most websites) */}
       <div className="flex-1 overflow-hidden">
-        <iframe
-          src={getPdfJsViewerUrl()}
-          className="w-full h-full border-0"
-          title={bookResponse.book.title}
-        />
+        {viewerUrl && (
+          <iframe
+            key={bookId}
+            src={viewerUrl}
+            className="w-full h-full border-0"
+            title={bookResponse.book.title}
+          />
+        )}
       </div>
     </div>
   );
