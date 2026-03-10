@@ -83,6 +83,12 @@ interface DraggedBook {
   fromSectionId: string | null;
 }
 
+interface BookDropTarget {
+  sectionId: string | null;
+  targetBookId: string | null;
+  placement: 'before' | 'after' | 'inside';
+}
+
 type TabType = 'recordings' | 'books' | 'notes' | 'students';
 
 const memberRoleStyles: Record<ClassRole, { label: string; className: string }> = {
@@ -255,7 +261,9 @@ export default function ClassPage() {
   const [deletingRecordingId, setDeletingRecordingId] = useState<string | null>(null);
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
   const [draggedBook, setDraggedBook] = useState<DraggedBook | null>(null);
+  const [bookDropTarget, setBookDropTarget] = useState<BookDropTarget | null>(null);
   const accessTokenRef = useRef<string | null>(null);
+  const draggedBookRef = useRef<DraggedBook | null>(null);
   const noteContentRef = useRef('');
   const currentNoteContentRef = useRef('');
   const classIdRef = useRef<string | null>(null);
@@ -722,7 +730,8 @@ export default function ClassPage() {
   const persistBookSection = async (sectionId: string | null, orderedBooks: Book[]) => {
     await Promise.all(
       orderedBooks.map(async (book, index) => {
-        if (book.position === index && book.section_id === sectionId) return;
+        const existingBook = books.find((item) => item.id === book.id);
+        if (existingBook && existingBook.position === index && existingBook.section_id === sectionId) return;
 
         const { error } = await supabase
           .from('books')
@@ -737,47 +746,6 @@ export default function ClassPage() {
     );
 
     await loadBooks();
-  };
-
-  const handleMoveBookToSection = async (book: Book, nextSectionId: string | null) => {
-    if (book.section_id === nextSectionId) return;
-
-    const sourceBooks = books
-      .filter((item) => item.section_id === book.section_id && item.id !== book.id)
-      .sort(compareBooks);
-    const targetBooks = books
-      .filter((item) => item.section_id === nextSectionId && item.id !== book.id)
-      .sort(compareBooks);
-
-    try {
-      const { error } = await supabase
-        .from('books')
-        .update({
-          section_id: nextSectionId,
-          position: targetBooks.length,
-        })
-        .eq('id', book.id);
-
-      if (error) throw error;
-
-      await Promise.all(
-        sourceBooks.map(async (item, index) => {
-          if (item.position === index) return;
-
-          const { error: updateError } = await supabase
-            .from('books')
-            .update({ position: index })
-            .eq('id', item.id);
-
-          if (updateError) throw updateError;
-        })
-      );
-
-      await loadBooks();
-    } catch (error) {
-      console.error('Error moving book to section:', error);
-      alert(getErrorMessage(error, 'Failed to move book'));
-    }
   };
 
   const handleDeleteBook = async (book: Book) => {
@@ -854,16 +822,23 @@ export default function ClassPage() {
     }
   };
 
-  const handleDropBook = async (targetSectionId: string | null, targetBookId?: string) => {
-    if (!draggedBook) return;
+  const handleDropBook = async (
+    targetSectionId: string | null,
+    targetBookId?: string,
+    placement: 'before' | 'after' | 'inside' = 'inside'
+  ) => {
+    const activeDraggedBook = draggedBookRef.current ?? draggedBook;
+    if (!activeDraggedBook) return;
 
-    const draggedItem = books.find((book) => book.id === draggedBook.bookId);
+    const draggedItem = books.find((book) => book.id === activeDraggedBook.bookId);
     if (!draggedItem) {
       setDraggedBook(null);
+      draggedBookRef.current = null;
+      setBookDropTarget(null);
       return;
     }
 
-    const sourceSectionId = draggedBook.fromSectionId;
+    const sourceSectionId = activeDraggedBook.fromSectionId;
     const sourceBooks = books
       .filter((book) => book.section_id === sourceSectionId && book.id !== draggedItem.id)
       .sort(compareBooks);
@@ -878,6 +853,8 @@ export default function ClassPage() {
 
     if (insertIndex < 0) {
       insertIndex = targetBaseBooks.length;
+    } else if (placement === 'after') {
+      insertIndex += 1;
     }
 
     const nextTargetBooks = [...targetBaseBooks];
@@ -886,7 +863,42 @@ export default function ClassPage() {
       section_id: targetSectionId,
     });
 
+    const nextBooks = books.map((book) => {
+      if (book.id === draggedItem.id) {
+        return {
+          ...book,
+          section_id: targetSectionId,
+          position: insertIndex,
+        };
+      }
+
+      return book;
+    });
+
+    sourceBooks.forEach((book, index) => {
+      const bookIndex = nextBooks.findIndex((item) => item.id === book.id);
+      if (bookIndex >= 0) {
+        nextBooks[bookIndex] = {
+          ...nextBooks[bookIndex],
+          section_id: sourceSectionId,
+          position: index,
+        };
+      }
+    });
+
+    nextTargetBooks.forEach((book, index) => {
+      const bookIndex = nextBooks.findIndex((item) => item.id === book.id);
+      if (bookIndex >= 0) {
+        nextBooks[bookIndex] = {
+          ...nextBooks[bookIndex],
+          section_id: targetSectionId,
+          position: index,
+        };
+      }
+    });
+
     try {
+      setBooks(nextBooks);
       if (sourceSectionId === targetSectionId) {
         await persistBookSection(targetSectionId, nextTargetBooks);
       } else {
@@ -898,8 +910,11 @@ export default function ClassPage() {
     } catch (error) {
       console.error('Error dropping book:', error);
       alert(getErrorMessage(error, 'Failed to move book'));
+      await loadBooks();
     } finally {
       setDraggedBook(null);
+      draggedBookRef.current = null;
+      setBookDropTarget(null);
     }
   };
 
@@ -1056,159 +1071,200 @@ export default function ClassPage() {
 
   const currentUserId = auth.user.id;
   const orderedSections = [...bookSections].sort(compareSections);
-  const sectionOptions = orderedSections.map((section) => ({
-    id: section.id,
-    title: section.title,
-  }));
   const organizedSections: OrganizedBookSection[] = orderedSections.map((section) => ({
     ...section,
     books: books.filter((book) => book.section_id === section.id).sort(compareBooks),
   }));
   const unassignedBooks = books.filter((book) => book.section_id === null).sort(compareBooks);
+  const renderDropIndicator = (compact = false) => (
+    <div
+      className={`rounded-full bg-blue-500/90 shadow-sm transition-all ${compact ? 'my-1 h-1.5' : 'my-2 h-2'}`}
+      aria-hidden="true"
+    />
+  );
 
   const renderBookCards = (sectionId: string | null, sectionBooks: Book[]) => {
+    const isEmptyDropTarget = bookDropTarget?.sectionId === sectionId && bookDropTarget.targetBookId === null;
+
     if (sectionBooks.length === 0) {
       return (
         <div
+          onDragEnter={(event) => {
+            if (!canEditClass || !draggedBookRef.current) return;
+            event.preventDefault();
+            setBookDropTarget({ sectionId, targetBookId: null, placement: 'inside' });
+          }}
           onDragOver={(event) => {
+            if (!canEditClass || !draggedBookRef.current) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'move';
+            setBookDropTarget({ sectionId, targetBookId: null, placement: 'inside' });
+          }}
+          onDrop={(event) => {
             if (!canEditClass) return;
             event.preventDefault();
+            event.stopPropagation();
+            void handleDropBook(sectionId, undefined, 'inside');
           }}
-          onDrop={() => {
-            if (!canEditClass) return;
-            void handleDropBook(sectionId);
-          }}
-          className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-sm text-gray-500"
+          className={`flex min-h-32 items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-sm transition ${isEmptyDropTarget ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 bg-gray-50 text-gray-500'}`}
         >
-          No books in this section.
+          <div className="text-center">
+            <p className="font-medium">No books in this section.</p>
+            <p className="mt-1 text-xs opacity-80">Drag a book here to move it in.</p>
+          </div>
         </div>
       );
     }
 
     return (
       <div
+        onDragEnter={(event) => {
+          if (!canEditClass || !draggedBookRef.current) return;
+          event.preventDefault();
+          setBookDropTarget({ sectionId, targetBookId: null, placement: 'inside' });
+        }}
         onDragOver={(event) => {
+          if (!canEditClass || !draggedBookRef.current) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          if (event.target === event.currentTarget) {
+            setBookDropTarget({ sectionId, targetBookId: null, placement: 'inside' });
+          }
+        }}
+        onDrop={(event) => {
           if (!canEditClass) return;
           event.preventDefault();
+          event.stopPropagation();
+          void handleDropBook(sectionId, undefined, 'inside');
         }}
-        onDrop={() => {
-          if (!canEditClass) return;
-          void handleDropBook(sectionId);
-        }}
-        className="space-y-3"
+        className={`space-y-3 rounded-xl transition ${isEmptyDropTarget ? 'bg-blue-50/60 p-2' : ''}`}
       >
         {sectionBooks.map((book) => (
-          <div
-            key={book.id}
-            draggable={canEditClass}
-            onDragStart={() => {
-              if (!canEditClass) return;
-              setDraggedBook({ bookId: book.id, fromSectionId: sectionId });
-            }}
-            onDragEnd={() => setDraggedBook(null)}
-            onDragOver={(event) => {
-              if (!canEditClass) return;
-              event.preventDefault();
-              event.stopPropagation();
-            }}
-            onDrop={(event) => {
-              if (!canEditClass) return;
-              event.preventDefault();
-              event.stopPropagation();
-              void handleDropBook(sectionId, book.id);
-            }}
-            className={`rounded-xl border bg-white p-4 shadow-sm transition ${draggedBook?.bookId === book.id ? 'opacity-60' : 'opacity-100'} ${canEditClass ? 'cursor-grab active:cursor-grabbing' : ''}`}
-          >
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start gap-3">
-                  {canEditClass && (
-                    <div className="pt-0.5 text-gray-400">
-                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h.01M8 12h.01M8 17h.01M16 7h.01M16 12h.01M16 17h.01" />
-                      </svg>
-                    </div>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    {editingBookId === book.id ? (
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={bookTitleDraft}
-                          onChange={(e) => setBookTitleDraft(e.target.value)}
-                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        />
-                        <button
-                          onClick={handleRenameBook}
-                          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                        >
-                          Save
-                        </button>
+          <div key={book.id}>
+            {bookDropTarget?.sectionId === sectionId &&
+              bookDropTarget.targetBookId === book.id &&
+              bookDropTarget.placement === 'before' &&
+              renderDropIndicator()}
+            <div
+              draggable={canEditClass}
+              onDragStart={(event) => {
+                if (!canEditClass) return;
+                const nextDraggedBook = { bookId: book.id, fromSectionId: sectionId };
+                draggedBookRef.current = nextDraggedBook;
+                setDraggedBook(nextDraggedBook);
+                setBookDropTarget({ sectionId, targetBookId: book.id, placement: 'before' });
+                event.dataTransfer.effectAllowed = 'move';
+              }}
+              onDragEnd={() => {
+                draggedBookRef.current = null;
+                setDraggedBook(null);
+                setBookDropTarget(null);
+              }}
+              onDragOver={(event) => {
+                if (!canEditClass || !draggedBookRef.current || draggedBookRef.current.bookId === book.id) return;
+                event.preventDefault();
+                event.stopPropagation();
+                event.dataTransfer.dropEffect = 'move';
+                const rect = event.currentTarget.getBoundingClientRect();
+                const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+                setBookDropTarget({ sectionId, targetBookId: book.id, placement });
+              }}
+              onDrop={(event) => {
+                if (!canEditClass || !draggedBookRef.current || draggedBookRef.current.bookId === book.id) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const rect = event.currentTarget.getBoundingClientRect();
+                const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+                void handleDropBook(sectionId, book.id, placement);
+              }}
+              className={`rounded-xl border bg-white p-4 shadow-sm transition-all ${draggedBook?.bookId === book.id ? 'scale-[0.99] opacity-60' : 'opacity-100'} ${bookDropTarget?.sectionId === sectionId && bookDropTarget.targetBookId === book.id ? 'border-blue-300 shadow-md' : 'border-gray-200'} ${canEditClass ? 'cursor-grab active:cursor-grabbing' : ''}`}
+            >
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start gap-3">
+                    {canEditClass && (
+                      <div className="pt-0.5 text-gray-400">
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h.01M8 12h.01M8 17h.01M16 7h.01M16 12h.01M16 17h.01" />
+                        </svg>
                       </div>
-                    ) : (
-                      <h5 className="truncate text-base font-semibold text-gray-900">{book.title}</h5>
                     )}
-                    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
-                      <ProcessingStatusBadge
-                        bookId={book.id}
-                        initialStatus={book.processing_status}
-                        onStatusChange={(status) => {
-                          setBooks((currentBooks) =>
-                            currentBooks.map((currentBook) =>
-                              currentBook.id === book.id ? { ...currentBook, processing_status: status } : currentBook
-                            )
-                          );
-                        }}
-                      />
-                      <span>{formatFileSize(book.file_size)}</span>
-                      <span>Uploaded {formatDate(book.uploaded_at)}</span>
+                    <div className="min-w-0 flex-1">
+                      {editingBookId === book.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={bookTitleDraft}
+                            onChange={(e) => setBookTitleDraft(e.target.value)}
+                            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <button
+                            onClick={handleRenameBook}
+                            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      ) : (
+                        <h5 className="truncate text-base font-semibold text-gray-900">{book.title}</h5>
+                      )}
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                        <ProcessingStatusBadge
+                          bookId={book.id}
+                          initialStatus={book.processing_status}
+                          onStatusChange={(status) => {
+                            setBooks((currentBooks) =>
+                              currentBooks.map((currentBook) =>
+                                currentBook.id === book.id ? { ...currentBook, processing_status: status } : currentBook
+                              )
+                            );
+                          }}
+                        />
+                        <span>{formatFileSize(book.file_size)}</span>
+                        <span>Uploaded {formatDate(book.uploaded_at)}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <Link
-                  href={`/dashboard/class/${slug}/book/${book.id}`}
-                  className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                >
-                  Open
-                </Link>
-                {canEditClass && (
-                  <>
-                    <button
-                      onClick={() => {
-                        setEditingBookId(book.id);
-                        setBookTitleDraft(book.title);
-                      }}
-                      className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300"
-                    >
-                      Rename
-                    </button>
-                    <button
-                      onClick={() => void handleDeleteBook(book)}
-                      disabled={deletingBookId === book.id}
-                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {deletingBookId === book.id ? 'Deleting...' : 'Delete'}
-                    </button>
-                    <select
-                      value={book.section_id ?? ''}
-                      onChange={(e) => void handleMoveBookToSection(book, e.target.value || null)}
-                      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">Unassigned</option>
-                      {sectionOptions.map((option) => (
-                        <option key={option.id} value={option.id}>
-                          {option.title}
-                        </option>
-                      ))}
-                    </select>
-                  </>
-                )}
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Link
+                    href={`/dashboard/class/${slug}/book/${book.id}`}
+                    className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                  >
+                    Open
+                  </Link>
+                  {canEditClass && (
+                    <>
+                      <button
+                        onClick={() => {
+                          setEditingBookId(book.id);
+                          setBookTitleDraft(book.title);
+                        }}
+                        className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        onClick={() => void handleDeleteBook(book)}
+                        disabled={deletingBookId === book.id}
+                        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {deletingBookId === book.id ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
+            {bookDropTarget?.sectionId === sectionId &&
+              bookDropTarget.targetBookId === book.id &&
+              bookDropTarget.placement === 'after' &&
+              renderDropIndicator()}
           </div>
         ))}
+        {bookDropTarget?.sectionId === sectionId &&
+          bookDropTarget.targetBookId === null &&
+          renderDropIndicator(true)}
       </div>
     );
   };
@@ -1404,7 +1460,7 @@ export default function ClassPage() {
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">Books</h3>
-                    <p className="text-sm text-gray-500">Organize books into sections and order them within each section.</p>
+                    <p className="text-sm text-gray-500">Drag books between sections to move them, and drag within a section to reorder them.</p>
                   </div>
                   {canEditClass && (
                     <button
