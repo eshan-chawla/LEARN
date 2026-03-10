@@ -77,26 +77,21 @@ export function PdfUploadModal({ classId, userId, isOpen, onClose, onSuccess }: 
 
       setUploadProgress(60);
 
-      // Get public URL (even though bucket is private, we store the path)
-      const { data: { publicUrl } } = supabase.storage
-        .from('books')
-        .getPublicUrl(storagePath);
-
-      setUploadProgress(80);
-
-      // Create book record in database
+      // Create book record in database (store storage_path, not URL)
       const { data: bookData, error: bookError } = await supabase
         .from('books')
         .insert({
           class_id: classId,
           title: title.trim(),
-          pdf_url: publicUrl,
+          pdf_url: storagePath, // Store the storage path instead of URL
           storage_path: storagePath,
           file_size: file.size,
           processing_status: 'pending'
         })
         .select()
         .single();
+
+      setUploadProgress(80);
 
       if (bookError) throw bookError;
 

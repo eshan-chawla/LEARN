@@ -198,7 +198,24 @@ export default function ClassPage() {
         .order('uploaded_at', { ascending: false });
 
       if (error) throw error;
-      setBooks(data || []);
+
+      // Generate signed URLs for each book (valid for 1 hour)
+      const booksWithSignedUrls = await Promise.all(
+        (data || []).map(async (book) => {
+          if (book.storage_path) {
+            const { data: signedData, error: signedError } = await supabase.storage
+              .from('books')
+              .createSignedUrl(book.storage_path, 3600); // 1 hour expiry
+
+            if (!signedError && signedData) {
+              return { ...book, pdf_url: signedData.signedUrl };
+            }
+          }
+          return book;
+        })
+      );
+
+      setBooks(booksWithSignedUrls);
     } catch (error) {
       console.error('Error loading books:', error);
     }
