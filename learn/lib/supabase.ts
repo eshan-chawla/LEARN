@@ -29,6 +29,55 @@ export function createSupabaseClient(accessToken?: string): SupabaseClient {
 export interface Database {
   public: {
     Tables: {
+      users: {
+        Row: {
+          id: string;
+          email: string;
+          name: string;
+          is_teacher: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          email: string;
+          name: string;
+          is_teacher?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          email?: string;
+          name?: string;
+          is_teacher?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      user_class: {
+        Row: {
+          user_id: string;
+          class_id: string;
+          can_edit: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          class_id: string;
+          can_edit?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          class_id?: string;
+          can_edit?: boolean;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       classes: {
         Row: {
           id: string;
@@ -64,7 +113,9 @@ export interface Database {
           class_id: string;
           title: string;
           video_url: string;
+          storage_path: string | null;
           duration: number | null;
+          processing_status: 'pending' | 'processing' | 'completed' | 'failed';
           uploaded_at: string;
           updated_at: string;
         };
@@ -73,7 +124,9 @@ export interface Database {
           class_id: string;
           title: string;
           video_url: string;
+          storage_path?: string | null;
           duration?: number | null;
+          processing_status?: 'pending' | 'processing' | 'completed' | 'failed';
           uploaded_at?: string;
           updated_at?: string;
         };
@@ -82,7 +135,9 @@ export interface Database {
           class_id?: string;
           title?: string;
           video_url?: string;
+          storage_path?: string | null;
           duration?: number | null;
+          processing_status?: 'pending' | 'processing' | 'completed' | 'failed';
           uploaded_at?: string;
           updated_at?: string;
         };
@@ -94,6 +149,9 @@ export interface Database {
           title: string;
           pdf_url: string;
           file_size: number | null;
+          processing_status: 'pending' | 'processing' | 'completed' | 'failed';
+          error_message: string | null;
+          storage_path: string | null;
           uploaded_at: string;
           updated_at: string;
         };
@@ -103,6 +161,9 @@ export interface Database {
           title: string;
           pdf_url: string;
           file_size?: number | null;
+          processing_status?: 'pending' | 'processing' | 'completed' | 'failed';
+          error_message?: string | null;
+          storage_path?: string | null;
           uploaded_at?: string;
           updated_at?: string;
         };
@@ -112,6 +173,9 @@ export interface Database {
           title?: string;
           pdf_url?: string;
           file_size?: number | null;
+          processing_status?: 'pending' | 'processing' | 'completed' | 'failed';
+          error_message?: string | null;
+          storage_path?: string | null;
           uploaded_at?: string;
           updated_at?: string;
         };

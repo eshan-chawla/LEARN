@@ -16,6 +16,13 @@ const s3 = new S3Client({
 
 const BUCKET_NAME = process.env.AWS_S3_RECORDINGS_BUCKET!;
 
+interface BookClass {
+  id: string;
+  user_id: string;
+  name: string;
+  slug: string | null;
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ bookId: string }> }
@@ -53,11 +60,7 @@ export async function GET(
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
 
-    // Double-check ownership
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || (book.classes as any).user_id !== user.id) {
-      return NextResponse.json({ error: 'Unauthorized to access this book' }, { status: 403 });
-    }
+    const bookClass = book.classes as unknown as BookClass;
 
     if (!book.storage_path) {
       return NextResponse.json({ error: 'Book has no storage path' }, { status: 400 });
@@ -81,14 +84,15 @@ export async function GET(
       },
       pdfUrl,
       expiresAt: new Date(Date.now() + 3600000).toISOString(),
-      className: (book.classes as any).name,
-      classSlug: (book.classes as any).slug,
+      className: bookClass.name,
+      classSlug: bookClass.slug,
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch book';
     console.error('Error fetching book:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch book' },
+      { error: message },
       { status: 500 }
     );
   }

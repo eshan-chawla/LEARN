@@ -56,15 +56,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Verify ownership
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || (book.classes as any).user_id !== user.id) {
-      return NextResponse.json(
-        { error: 'Unauthorized to access this book' },
-        { status: 403 }
-      );
-    }
-
     // Verify storage path matches
     if (book.storage_path !== storagePath) {
       return NextResponse.json(
@@ -91,10 +82,11 @@ export async function POST(request: NextRequest) {
       expiresAt: new Date(Date.now() + 3600000).toISOString(),
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to refresh URL';
     console.error('Error refreshing URL:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to refresh URL' },
+      { error: message },
       { status: 500 }
     );
   }

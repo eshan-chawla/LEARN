@@ -2,7 +2,7 @@
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { generateSlug, formatDate } from '@/lib/utils';
 import Link from 'next/link';
@@ -16,11 +16,19 @@ interface Class {
   slug?: string | null;
 }
 
+interface UserProfile {
+  id: string;
+  email: string;
+  name: string;
+  is_teacher: boolean;
+}
+
 export default function DashboardPage() {
   const auth = useAuth();
   const router = useRouter();
 
   const [classes, setClasses] = useState<Class[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [showCreateClass, setShowCreateClass] = useState(false);
   const [newClassName, setNewClassName] = useState('');
   const [newClassDescription, setNewClassDescription] = useState('');
@@ -32,14 +40,38 @@ export default function DashboardPage() {
     }
   }, [auth.loading, auth.user, router]);
 
-  // Load classes when user is authenticated
-  useEffect(() => {
-    if (auth.user) {
-      loadClasses();
+  const loadUserProfile = useCallback(async () => {
+    if (!auth.user) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, email, name, is_teacher')
+        .eq('id', auth.user.id)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      setUserProfile(
+        data ?? {
+          id: auth.user.id,
+          email: auth.user.email || '',
+          name: auth.user.user_metadata?.name || auth.user.email || 'User',
+          is_teacher: false,
+        }
+      );
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+      setUserProfile({
+        id: auth.user.id,
+        email: auth.user.email || '',
+        name: auth.user.user_metadata?.name || auth.user.email || 'User',
+        is_teacher: false,
+      });
     }
   }, [auth.user]);
 
-  const loadClasses = async () => {
+  const loadClasses = useCallback(async () => {
     try {
       setLoading(true);
       const { data, error } = await supabase
@@ -54,7 +86,15 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  // Load classes when user is authenticated
+  useEffect(() => {
+    if (auth.user) {
+      loadUserProfile();
+      loadClasses();
+    }
+  }, [auth.user, loadClasses, loadUserProfile]);
 
   const handleSignOut = async () => {
     try {
@@ -67,13 +107,17 @@ export default function DashboardPage() {
 
   const handleCreateClass = async () => {
     if (!newClassName.trim() || !auth.user) return;
+    if (!userProfile?.is_teacher) {
+      alert('Only teachers can create classes.');
+      return;
+    }
 
     try {
       setLoading(true);
       const slug = generateSlug(newClassName) + '-' + Date.now().toString(36);
 
       // Try to create with slug, fallback to without slug if column doesn't exist
-      let insertData: any = {
+      const insertData = {
         name: newClassName,
         description: newClassDescription || null,
         user_id: auth.user.id,
@@ -114,12 +158,10 @@ export default function DashboardPage() {
 
       // Navigate to the new class page using slug if available, otherwise use ID
       router.push(`/dashboard/class/${data.slug || data.id}`);
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('Error creating class:', error);
-      console.error('Error message:', error?.message);
-      console.error('Error details:', error?.details);
-      console.error('Error hint:', error?.hint);
-      alert(`Failed to create class: ${error?.message || 'Unknown error'}`);
+      alert(`Failed to create class: ${message}`);
     } finally {
       setLoading(false);
     }
@@ -140,6 +182,9 @@ export default function DashboardPage() {
     return null;
   }
 
+  const displayName = userProfile?.name || auth.user.user_metadata?.name || auth.user.email;
+  const canCreateClasses = userProfile?.is_teacher ?? false;
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -148,7 +193,7 @@ export default function DashboardPage() {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Learning Aid</h1>
-              <p className="text-sm text-gray-600">Welcome, {auth.user.user_metadata?.name || auth.user.email}</p>
+              <p className="text-sm text-gray-600">Welcome, {displayName}</p>
             </div>
             <button
               onClick={handleSignOut}
@@ -168,15 +213,17 @@ export default function DashboardPage() {
               <h2 className="text-3xl font-bold text-gray-900">My Classes</h2>
               <p className="text-gray-600 mt-1">Organize your learning materials in one place</p>
             </div>
-            <button
-              onClick={() => setShowCreateClass(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Create Class
-            </button>
+            {canCreateClasses && (
+              <button
+                onClick={() => setShowCreateClass(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Create Class
+              </button>
+            )}
           </div>
         </div>
 
@@ -248,13 +295,19 @@ export default function DashboardPage() {
               </svg>
             </div>
             <h3 className="text-xl font-semibold text-gray-900 mb-2">No classes yet</h3>
-            <p className="text-gray-600 mb-6">Get started by creating your first class</p>
-            <button
-              onClick={() => setShowCreateClass(true)}
-              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
-              Create Your First Class
-            </button>
+            <p className="text-gray-600 mb-6">
+              {canCreateClasses
+                ? 'Get started by creating your first class'
+                : 'Your classes will appear here once a teacher adds you to one.'}
+            </p>
+            {canCreateClasses && (
+              <button
+                onClick={() => setShowCreateClass(true)}
+                className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
+                Create Your First Class
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

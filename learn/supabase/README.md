@@ -8,6 +8,8 @@ Run these SQL scripts in order in your **Supabase Dashboard → SQL Editor**:
 |-------|------|---------|
 | 0 | `00_DELETE_EVERYTHING.sql` | ⚠️ Optional — wipes all tables for a clean reset |
 | 1 | `01_SETUP_EVERYTHING.sql` | ✅ Required — all tables, indexes, RLS policies |
+| 2 | `02_ADD_USERS_TABLE_AND_TEACHER_ROLE.sql` | Apply on existing databases to add user profiles + teacher-gated class creation |
+| 3 | `03_ADD_USER_CLASS_MEMBERSHIPS.sql` | Apply on existing databases to add class memberships with view/edit access |
 
 ---
 
@@ -16,7 +18,7 @@ Run these SQL scripts in order in your **Supabase Dashboard → SQL Editor**:
 ```
 PDF files   → AWS S3  (books/{classId}/…)
 Video files → AWS S3  (videos/{classId}/…)
-Metadata    → Supabase Database (classes, recordings, books, notes tables)
+Metadata    → Supabase Database (users, classes, user_class, recordings, books, notes tables)
 ```
 
 Both asset types are uploaded directly from the browser to S3 via a pre-signed PUT URL from `/api/upload-asset`. The viewer fetches PDFs via a time-limited S3 pre-signed GET URL from `/api/books/[bookId]`.
@@ -27,14 +29,18 @@ Both asset types are uploaded directly from the browser to S3 via a pre-signed P
 
 ### Tables (`01_SETUP_EVERYTHING.sql`)
 - `classes` — Classes created by users
+- `users` — App user profiles and roles, synced from `auth.users`
 - `recordings` — Video recording metadata (video hosted on S3)
 - `books` — PDF metadata (PDF hosted on S3)
 - `notes` — Text notes per class (autosaved)
+- `user_class` — User-to-class memberships with `can_edit` access control
 - `pdf_processing_jobs` — Tracks async PDF processing for Lambda/embeddings
 
 ### Security
 - Row Level Security (RLS) enabled on all tables
 - Users can only read/write their own data
+- Only users with `users.is_teacher = true` can create classes
+- `user_class.can_edit = true` allows editing class content; `false` is view-only access
 - Service role can update `pdf_processing_jobs` (required by Lambda)
 
 ---

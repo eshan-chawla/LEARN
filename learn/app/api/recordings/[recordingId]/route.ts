@@ -58,12 +58,7 @@ export async function GET(
       return NextResponse.json({ error: 'Recording not found' }, { status: 404 });
     }
 
-    const { data: { user } } = await supabase.auth.getUser();
     const recordingClass = recording.classes as unknown as RecordingClass;
-
-    if (!user || recordingClass.user_id !== user.id) {
-      return NextResponse.json({ error: 'Unauthorized to access this recording' }, { status: 403 });
-    }
 
     let videoUrl = recording.video_url;
     let expiresAt: string | null = null;
