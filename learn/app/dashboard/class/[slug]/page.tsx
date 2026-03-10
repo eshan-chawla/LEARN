@@ -8,6 +8,7 @@ import { formatDate } from '@/lib/utils';
 import { useAutosave } from '@/hooks/useAutosave';
 import { SaveStatusIndicator } from '@/components/SaveStatusIndicator';
 import { PdfUploadModal } from '@/components/PdfUploadModal';
+import { VideoUploadModal } from '@/components/VideoUploadModal';
 import { ProcessingStatusBadge } from '@/components/ProcessingStatusBadge';
 import Link from 'next/link';
 
@@ -25,6 +26,9 @@ interface Recording {
   class_id: string;
   title: string;
   video_url: string;
+  storage_path: string | null;
+  duration: number | null;
+  processing_status: 'pending' | 'processing' | 'completed' | 'failed';
   uploaded_at: string;
 }
 
@@ -63,6 +67,7 @@ export default function ClassPage() {
   const [currentNote, setCurrentNote] = useState<Note | null>(null);
   const [noteId, setNoteId] = useState<string | null>(null);
   const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [videoUploadModalOpen, setVideoUploadModalOpen] = useState(false);
 
   // Autosave hook for notes
   const autosave = useAutosave({
@@ -181,7 +186,24 @@ export default function ClassPage() {
         .order('uploaded_at', { ascending: false });
 
       if (error) throw error;
-      setRecordings(data || []);
+
+      // Generate signed URLs for each recording (valid for 1 hour)
+      const recordingsWithSignedUrls = await Promise.all(
+        (data || []).map(async (recording) => {
+          if (recording.storage_path) {
+            const { data: signedData, error: signedError } = await supabase.storage
+              .from('recordings')
+              .createSignedUrl(recording.storage_path, 3600); // 1 hour expiry
+
+            if (!signedError && signedData) {
+              return { ...recording, video_url: signedData.signedUrl };
+            }
+          }
+          return recording;
+        })
+      );
+
+      setRecordings(recordingsWithSignedUrls);
     } catch (error) {
       console.error('Error loading recordings:', error);
     }
@@ -247,6 +269,10 @@ export default function ClassPage() {
     } catch (error) {
       console.error('Error loading note:', error);
     }
+  };
+
+  const handleVideoUploadSuccess = () => {
+    loadRecordings(); // Reload recordings after successful upload
   };
 
   const handleAddRecording = async () => {
@@ -415,13 +441,13 @@ export default function ClassPage() {
                 <div className="flex justify-between items-center mb-6">
                   <h3 className="text-lg font-semibold text-gray-900">Class Recordings</h3>
                   <button
-                    onClick={handleAddRecording}
+                    onClick={() => setVideoUploadModalOpen(true)}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                    Add Recording
+                    Upload Video
                   </button>
                 </div>
                 {recordings.length === 0 ? (
@@ -434,11 +460,18 @@ export default function ClassPage() {
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {recordings.map((recording) => (
-                      <div key={recording.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow">
-                        <h4 className="font-medium text-gray-900 mb-3">{recording.title}</h4>
+                      <div key={recording.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
+                        <div className="flex items-start justify-between mb-3">
+                          <h4 className="font-medium text-gray-900 flex-1">{recording.title}</h4>
+                          {recording.duration && (
+                            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded ml-2">
+                              {Math.floor(recording.duration / 60)}:{(recording.duration % 60).toString().padStart(2, '0')}
+                            </span>
+                          )}
+                        </div>
                         <video
                           controls
-                          className="w-full rounded"
+                          className="w-full rounded bg-black"
                           src={recording.video_url}
                         >
                           Your browser does not support the video tag.
@@ -549,6 +582,17 @@ export default function ClassPage() {
           isOpen={uploadModalOpen}
           onClose={() => setUploadModalOpen(false)}
           onSuccess={handleUploadSuccess}
+        />
+      )}
+
+      {/* Video Upload Modal */}
+      {classData && auth.user && (
+        <VideoUploadModal
+          classId={classData.id}
+          userId={auth.user.id}
+          isOpen={videoUploadModalOpen}
+          onClose={() => setVideoUploadModalOpen(false)}
+          onSuccess={handleVideoUploadSuccess}
         />
       )}
     </div>

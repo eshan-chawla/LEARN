@@ -26,7 +26,9 @@ CREATE TABLE recordings (
   class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   video_url TEXT NOT NULL,
+  storage_path TEXT,
   duration INTEGER,
+  processing_status TEXT DEFAULT 'pending' CHECK (processing_status IN ('pending', 'processing', 'completed', 'failed')),
   uploaded_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
