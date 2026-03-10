@@ -261,6 +261,8 @@ export default function ClassPage() {
   const [sectionTitleDraft, setSectionTitleDraft] = useState('');
   const [draggedSectionId, setDraggedSectionId] = useState<string | null>(null);
   const [sectionDropTarget, setSectionDropTarget] = useState<SectionDropTarget | null>(null);
+  const [editingRecordingId, setEditingRecordingId] = useState<string | null>(null);
+  const [recordingTitleDraft, setRecordingTitleDraft] = useState('');
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [bookTitleDraft, setBookTitleDraft] = useState('');
   const [deletingRecordingId, setDeletingRecordingId] = useState<string | null>(null);
@@ -832,6 +834,30 @@ export default function ClassPage() {
     } catch (error) {
       console.error('Error renaming book:', error);
       alert(getErrorMessage(error, 'Failed to rename book'));
+    }
+  };
+
+  const handleRenameRecording = async () => {
+    if (!editingRecordingId || !recordingTitleDraft.trim()) return;
+
+    try {
+      const { error } = await supabase
+        .from('recordings')
+        .update({ title: recordingTitleDraft.trim() })
+        .eq('id', editingRecordingId);
+
+      if (error) throw error;
+
+      setEditingRecordingId(null);
+      setRecordingTitleDraft('');
+      setRecordings((currentRecordings) =>
+        currentRecordings.map((recording) =>
+          recording.id === editingRecordingId ? { ...recording, title: recordingTitleDraft.trim() } : recording
+        )
+      );
+    } catch (error) {
+      console.error('Error renaming recording:', error);
+      alert(getErrorMessage(error, 'Failed to rename recording'));
     }
   };
 
@@ -1550,7 +1576,51 @@ export default function ClassPage() {
                         <tbody className="divide-y divide-gray-200 bg-white">
                           {recordings.map((recording) => (
                             <tr key={recording.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-4 text-sm font-medium text-gray-900">{recording.title}</td>
+                              <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                                {editingRecordingId === recording.id ? (
+                                  <input
+                                    value={recordingTitleDraft}
+                                    onChange={(event) => setRecordingTitleDraft(event.target.value)}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter') {
+                                        event.preventDefault();
+                                        void handleRenameRecording();
+                                      }
+                                      if (event.key === 'Escape') {
+                                        setEditingRecordingId(null);
+                                        setRecordingTitleDraft('');
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      if (!recordingTitleDraft.trim()) {
+                                        setEditingRecordingId(null);
+                                        setRecordingTitleDraft('');
+                                        return;
+                                      }
+                                      void handleRenameRecording();
+                                    }}
+                                    autoFocus
+                                    className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (!canEditClass) return;
+                                      setEditingRecordingId(recording.id);
+                                      setRecordingTitleDraft(recording.title);
+                                    }}
+                                    className={`group inline-flex items-center gap-2 truncate text-left text-sm font-semibold text-gray-900 ${canEditClass ? 'hover:text-gray-900' : ''}`}
+                                  >
+                                    <span className="truncate">{recording.title}</span>
+                                    {canEditClass && (
+                                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 opacity-0 transition-opacity group-hover:opacity-100">
+                                        Click to edit
+                                      </span>
+                                    )}
+                                  </button>
+                                )}
+                              </td>
                               <td className="px-4 py-4 text-sm text-gray-600">
                                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${recordingStatusStyles[recording.processing_status].className}`}>
                                   {recordingStatusStyles[recording.processing_status].icon}
