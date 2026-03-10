@@ -501,14 +501,12 @@ export default function ClassPage() {
                             <p className="text-xs text-gray-500 mt-2 mb-2">
                               Uploaded: {formatDate(book.uploaded_at)}
                             </p>
-                            <a
-                              href={book.pdf_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                            <Link
+                              href={`/dashboard/class/${slug}/book/${book.id}`}
                               className="text-sm text-blue-600 hover:text-blue-700 font-medium"
                             >
-                              Open PDF →
-                            </a>
+                              Open Book →
+                            </Link>
                           </div>
                         </div>
                       </div>
