@@ -203,6 +203,10 @@ export default function ClassPage() {
         })
       );
 
+      recordingsWithSignedUrls.sort(
+        (a, b) => new Date(b.uploaded_at).getTime() - new Date(a.uploaded_at).getTime()
+      );
+
       setRecordings(recordingsWithSignedUrls);
     } catch (error) {
       console.error('Error loading recordings:', error);
@@ -440,29 +444,55 @@ export default function ClassPage() {
                     <p className="text-gray-500">No recordings yet. Add your first recording!</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {recordings.map((recording) => (
-                      <div key={recording.id} className="border rounded-lg p-4 hover:shadow-md transition-shadow bg-white">
-                        <div className="flex items-start justify-between mb-3">
-                          <h4 className="font-medium text-gray-900 flex-1">{recording.title}</h4>
-                          {recording.duration && (
-                            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded ml-2">
-                              {Math.floor(recording.duration / 60)}:{(recording.duration % 60).toString().padStart(2, '0')}
-                            </span>
-                          )}
-                        </div>
-                        <video
-                          controls
-                          className="w-full rounded bg-black"
-                          src={recording.video_url}
-                        >
-                          Your browser does not support the video tag.
-                        </video>
-                        <p className="text-xs text-gray-500 mt-2">
-                          Uploaded: {formatDate(recording.uploaded_at)}
-                        </p>
-                      </div>
-                    ))}
+                  <div className="overflow-hidden rounded-lg border border-gray-200">
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Title
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Duration
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Uploaded
+                            </th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Action
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 bg-white">
+                          {recordings.map((recording) => (
+                            <tr key={recording.id} className="hover:bg-gray-50">
+                              <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                                {recording.title}
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-600">
+                                {recording.duration
+                                  ? `${Math.floor(recording.duration / 60)}:${(recording.duration % 60).toString().padStart(2, '0')}`
+                                  : '—'}
+                              </td>
+                              <td className="px-4 py-4 text-sm text-gray-600">
+                                {formatDate(recording.uploaded_at)}
+                              </td>
+                              <td className="px-4 py-4 text-right">
+                                <Link
+                                  href={`/dashboard/class/${slug}/video/${recording.id}`}
+                                  className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+                                >
+                                  <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M6.3 4.84A1 1 0 017.8 4l6.7 5.16a1 1 0 010 1.68L7.8 16a1 1 0 01-1.5-.84V4.84z" />
+                                  </svg>
+                                  Open
+                                </Link>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
