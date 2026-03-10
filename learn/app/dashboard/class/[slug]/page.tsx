@@ -59,11 +59,13 @@ interface Note {
   updated_at: string;
 }
 
-interface StudentViewer {
+type ClassRole = 'owner' | 'manager' | 'student';
+
+interface ClassMember {
   user_id: string;
   email: string;
   name: string;
-  can_edit: boolean;
+  role: ClassRole;
   created_at: string;
 }
 
@@ -76,7 +78,27 @@ interface OrganizedBookSection extends BookSection {
   books: Book[];
 }
 
+interface DraggedBook {
+  bookId: string;
+  fromSectionId: string | null;
+}
+
 type TabType = 'recordings' | 'books' | 'notes' | 'students';
+
+const memberRoleStyles: Record<ClassRole, { label: string; className: string }> = {
+  owner: {
+    label: 'Owner',
+    className: 'bg-amber-100 text-amber-800',
+  },
+  manager: {
+    label: 'Manager',
+    className: 'bg-blue-100 text-blue-700',
+  },
+  student: {
+    label: 'Student',
+    className: 'bg-gray-100 text-gray-700',
+  },
+};
 
 const recordingStatusStyles: Record<Recording['processing_status'], { label: string; className: string; icon: ReactNode }> = {
   pending: {
@@ -206,7 +228,7 @@ export default function ClassPage() {
   const [classData, setClassData] = useState<Class | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('recordings');
   const [loading, setLoading] = useState(true);
-  const [canEditClass, setCanEditClass] = useState(false);
+  const [classRole, setClassRole] = useState<ClassRole | null>(null);
 
   const [recordings, setRecordings] = useState<Recording[]>([]);
   const [bookSections, setBookSections] = useState<BookSection[]>([]);
@@ -217,11 +239,12 @@ export default function ClassPage() {
   const [noteError, setNoteError] = useState<string | null>(null);
   const [bookUploadTarget, setBookUploadTarget] = useState<BookUploadTarget | null>(null);
   const [videoUploadModalOpen, setVideoUploadModalOpen] = useState(false);
-  const [students, setStudents] = useState<StudentViewer[]>([]);
-  const [studentsLoading, setStudentsLoading] = useState(false);
-  const [studentEmail, setStudentEmail] = useState('');
-  const [studentError, setStudentError] = useState<string | null>(null);
-  const [addingStudent, setAddingStudent] = useState(false);
+  const [members, setMembers] = useState<ClassMember[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+  const [memberEmail, setMemberEmail] = useState('');
+  const [memberError, setMemberError] = useState<string | null>(null);
+  const [addingMember, setAddingMember] = useState(false);
+  const [updatingMemberId, setUpdatingMemberId] = useState<string | null>(null);
 
   const [newSectionTitle, setNewSectionTitle] = useState('');
   const [creatingSection, setCreatingSection] = useState(false);
@@ -229,11 +252,16 @@ export default function ClassPage() {
   const [sectionTitleDraft, setSectionTitleDraft] = useState('');
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [bookTitleDraft, setBookTitleDraft] = useState('');
+  const [deletingRecordingId, setDeletingRecordingId] = useState<string | null>(null);
+  const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
+  const [draggedBook, setDraggedBook] = useState<DraggedBook | null>(null);
   const accessTokenRef = useRef<string | null>(null);
   const noteContentRef = useRef('');
   const currentNoteContentRef = useRef('');
   const classIdRef = useRef<string | null>(null);
   const canEditClassRef = useRef(false);
+  const canEditClass = classRole === 'owner' || classRole === 'manager';
+  const isOwner = classRole === 'owner';
 
   useEffect(() => {
     if (!auth.loading && !auth.user) {
@@ -305,16 +333,23 @@ export default function ClassPage() {
       if (!classData || !auth.user) return;
 
       try {
-        if (classData.user_id === auth.user.id) {
-          setCanEditClass(true);
-        } else {
-          const { data: canEditData, error: canEditError } = await supabase.rpc('can_edit_class', {
-            target_class_id: classData.id,
-          });
+        const nextRole: ClassRole = classData.user_id === auth.user.id
+          ? 'owner'
+          : await (async () => {
+            const { data: roleData, error: roleError } = await supabase.rpc('get_class_role', {
+              target_class_id: classData.id,
+            });
 
-          if (canEditError) throw canEditError;
-          setCanEditClass(Boolean(canEditData));
-        }
+            if (roleError) throw roleError;
+
+            if (roleData === 'owner' || roleData === 'manager' || roleData === 'student') {
+              return roleData;
+            }
+
+            throw new Error('Unauthorized to access this class');
+          })();
+
+        setClassRole(nextRole);
 
         const [recordingsResult, booksResult, sectionsResult] = await Promise.all([
           supabase
@@ -395,29 +430,29 @@ export default function ClassPage() {
   }, [activeTab, classData]);
 
   useEffect(() => {
-    const loadStudents = async () => {
+    const loadMembers = async () => {
       if (!classData || !canEditClass || activeTab !== 'students') return;
 
       try {
-        setStudentsLoading(true);
-        setStudentError(null);
+        setMembersLoading(true);
+        setMemberError(null);
 
-        const { data, error } = await supabase.rpc('list_class_viewers', {
+        const { data, error } = await supabase.rpc('list_class_members', {
           target_class_id: classData.id,
         });
 
         if (error) throw error;
-        setStudents((data || []) as StudentViewer[]);
+        setMembers((data || []) as ClassMember[]);
       } catch (error: unknown) {
-        const message = getErrorMessage(error, 'Failed to load students');
-        console.error('Error loading students:', error);
-        setStudentError(message);
+        const message = getErrorMessage(error, 'Failed to load members');
+        console.error('Error loading members:', error);
+        setMemberError(message);
       } finally {
-        setStudentsLoading(false);
+        setMembersLoading(false);
       }
     };
 
-    void loadStudents();
+    void loadMembers();
   }, [classData, canEditClass, activeTab]);
 
   const loadRecordings = async () => {
@@ -462,40 +497,126 @@ export default function ClassPage() {
     await Promise.all([loadBooks(), loadBookSections()]);
   };
 
-  const loadStudents = async () => {
+  const loadMembers = async () => {
     if (!classData || !canEditClass) return;
 
-    const { data, error } = await supabase.rpc('list_class_viewers', {
+    const { data, error } = await supabase.rpc('list_class_members', {
       target_class_id: classData.id,
     });
 
     if (error) throw error;
-    setStudents((data || []) as StudentViewer[]);
+    setMembers((data || []) as ClassMember[]);
   };
 
-  const handleAddStudent = async () => {
-    if (!classData || !canEditClass || !studentEmail.trim()) return;
+  const handleAddMember = async () => {
+    if (!classData || !canEditClass || !memberEmail.trim()) return;
 
     try {
-      setAddingStudent(true);
-      setStudentError(null);
+      setAddingMember(true);
+      setMemberError(null);
 
       const { error } = await supabase.rpc('add_user_to_class_by_email', {
         target_class_id: classData.id,
-        target_email: studentEmail.trim(),
-        target_can_edit: false,
+        target_email: memberEmail.trim(),
+        target_role: 'student',
       });
 
       if (error) throw error;
 
-      setStudentEmail('');
-      await loadStudents();
+      setMemberEmail('');
+      await loadMembers();
     } catch (error: unknown) {
       const message = getErrorMessage(error, 'Failed to add user');
-      console.error('Error adding student:', error);
-      setStudentError(message);
+      console.error('Error adding member:', error);
+      setMemberError(message);
     } finally {
-      setAddingStudent(false);
+      setAddingMember(false);
+    }
+  };
+
+  const handleRemoveMember = async (member: ClassMember) => {
+    if (!classData || !canEditClass) return;
+
+    const confirmed = window.confirm(`Remove ${member.email} from this class?`);
+    if (!confirmed) return;
+
+    try {
+      setUpdatingMemberId(member.user_id);
+      setMemberError(null);
+
+      const { data, error } = await supabase.rpc('remove_user_from_class', {
+        target_class_id: classData.id,
+        target_user_id: member.user_id,
+      });
+
+      if (error) throw error;
+      if (!data) {
+        throw new Error('User is not enrolled in this class');
+      }
+
+      await loadMembers();
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Failed to remove user');
+      console.error('Error removing member:', error);
+      setMemberError(message);
+    } finally {
+      setUpdatingMemberId(null);
+    }
+  };
+
+  const handleChangeMemberRole = async (member: ClassMember, nextRole: Exclude<ClassRole, 'owner'>) => {
+    if (!classData || !isOwner) return;
+
+    try {
+      setUpdatingMemberId(member.user_id);
+      setMemberError(null);
+
+      const { error } = await supabase.rpc('update_class_member_role', {
+        target_class_id: classData.id,
+        target_user_id: member.user_id,
+        target_role: nextRole,
+      });
+
+      if (error) throw error;
+
+      await loadMembers();
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Failed to update role');
+      console.error('Error updating member role:', error);
+      setMemberError(message);
+    } finally {
+      setUpdatingMemberId(null);
+    }
+  };
+
+  const handleTransferOwnership = async (member: ClassMember) => {
+    if (!classData || !isOwner) return;
+
+    const confirmed = window.confirm(`Transfer ownership of this class to ${member.email}? You will become a manager.`);
+    if (!confirmed) return;
+
+    try {
+      setUpdatingMemberId(member.user_id);
+      setMemberError(null);
+
+      const { error } = await supabase.rpc('transfer_class_ownership', {
+        target_class_id: classData.id,
+        target_user_id: member.user_id,
+      });
+
+      if (error) throw error;
+
+      setClassData((currentClass) => (
+        currentClass ? { ...currentClass, user_id: member.user_id } : currentClass
+      ));
+      setClassRole('manager');
+      await loadMembers();
+    } catch (error: unknown) {
+      const message = getErrorMessage(error, 'Failed to transfer ownership');
+      console.error('Error transferring ownership:', error);
+      setMemberError(message);
+    } finally {
+      setUpdatingMemberId(null);
     }
   };
 
@@ -598,14 +719,17 @@ export default function ClassPage() {
     }
   };
 
-  const persistBookOrder = async (orderedBooks: Book[]) => {
+  const persistBookSection = async (sectionId: string | null, orderedBooks: Book[]) => {
     await Promise.all(
       orderedBooks.map(async (book, index) => {
-        if (book.position === index) return;
+        if (book.position === index && book.section_id === sectionId) return;
 
         const { error } = await supabase
           .from('books')
-          .update({ position: index })
+          .update({
+            section_id: sectionId,
+            position: index,
+          })
           .eq('id', book.id);
 
         if (error) throw error;
@@ -613,25 +737,6 @@ export default function ClassPage() {
     );
 
     await loadBooks();
-  };
-
-  const handleMoveBook = async (sectionId: string | null, bookId: string, direction: 'up' | 'down') => {
-    const orderedBooks = books
-      .filter((book) => book.section_id === sectionId)
-      .sort(compareBooks);
-
-    const currentIndex = orderedBooks.findIndex((book) => book.id === bookId);
-    if (currentIndex < 0) return;
-
-    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    if (targetIndex < 0 || targetIndex >= orderedBooks.length) return;
-
-    try {
-      await persistBookOrder(moveItem(orderedBooks, currentIndex, targetIndex));
-    } catch (error) {
-      console.error('Error moving book:', error);
-      alert(getErrorMessage(error, 'Failed to reorder book'));
-    }
   };
 
   const handleMoveBookToSection = async (book: Book, nextSectionId: string | null) => {
@@ -672,6 +777,129 @@ export default function ClassPage() {
     } catch (error) {
       console.error('Error moving book to section:', error);
       alert(getErrorMessage(error, 'Failed to move book'));
+    }
+  };
+
+  const handleDeleteBook = async (book: Book) => {
+    if (!canEditClass) return;
+
+    const confirmed = window.confirm(`Delete "${book.title}"? This will remove the book file too.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingBookId(book.id);
+
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData?.session?.access_token) {
+        throw new Error('Your session has expired. Please sign in again.');
+      }
+
+      const response = await fetch(`/api/books/${book.id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === 'string' ? payload.error : 'Failed to delete book');
+      }
+
+      const remainingBooks = books
+        .filter((item) => item.id !== book.id && item.section_id === book.section_id)
+        .sort(compareBooks);
+
+      await persistBookSection(book.section_id, remainingBooks);
+    } catch (error) {
+      console.error('Error deleting book:', error);
+      alert(getErrorMessage(error, 'Failed to delete book'));
+    } finally {
+      setDeletingBookId(null);
+    }
+  };
+
+  const handleDeleteRecording = async (recording: Recording) => {
+    if (!canEditClass) return;
+
+    const confirmed = window.confirm(`Delete "${recording.title}"? This will remove the video file too.`);
+    if (!confirmed) return;
+
+    try {
+      setDeletingRecordingId(recording.id);
+
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !sessionData?.session?.access_token) {
+        throw new Error('Your session has expired. Please sign in again.');
+      }
+
+      const response = await fetch(`/api/recordings/${recording.id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`,
+        },
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === 'string' ? payload.error : 'Failed to delete recording');
+      }
+
+      await loadRecordings();
+    } catch (error) {
+      console.error('Error deleting recording:', error);
+      alert(getErrorMessage(error, 'Failed to delete recording'));
+    } finally {
+      setDeletingRecordingId(null);
+    }
+  };
+
+  const handleDropBook = async (targetSectionId: string | null, targetBookId?: string) => {
+    if (!draggedBook) return;
+
+    const draggedItem = books.find((book) => book.id === draggedBook.bookId);
+    if (!draggedItem) {
+      setDraggedBook(null);
+      return;
+    }
+
+    const sourceSectionId = draggedBook.fromSectionId;
+    const sourceBooks = books
+      .filter((book) => book.section_id === sourceSectionId && book.id !== draggedItem.id)
+      .sort(compareBooks);
+
+    const targetBaseBooks = (sourceSectionId === targetSectionId ? sourceBooks : books
+      .filter((book) => book.section_id === targetSectionId && book.id !== draggedItem.id)
+      .sort(compareBooks));
+
+    let insertIndex = targetBookId
+      ? targetBaseBooks.findIndex((book) => book.id === targetBookId)
+      : targetBaseBooks.length;
+
+    if (insertIndex < 0) {
+      insertIndex = targetBaseBooks.length;
+    }
+
+    const nextTargetBooks = [...targetBaseBooks];
+    nextTargetBooks.splice(insertIndex, 0, {
+      ...draggedItem,
+      section_id: targetSectionId,
+    });
+
+    try {
+      if (sourceSectionId === targetSectionId) {
+        await persistBookSection(targetSectionId, nextTargetBooks);
+      } else {
+        await Promise.all([
+          persistBookSection(sourceSectionId, sourceBooks),
+          persistBookSection(targetSectionId, nextTargetBooks),
+        ]);
+      }
+    } catch (error) {
+      console.error('Error dropping book:', error);
+      alert(getErrorMessage(error, 'Failed to move book'));
+    } finally {
+      setDraggedBook(null);
     }
   };
 
@@ -826,6 +1054,7 @@ export default function ClassPage() {
     return null;
   }
 
+  const currentUserId = auth.user.id;
   const orderedSections = [...bookSections].sort(compareSections);
   const sectionOptions = orderedSections.map((section) => ({
     id: section.id,
@@ -836,6 +1065,153 @@ export default function ClassPage() {
     books: books.filter((book) => book.section_id === section.id).sort(compareBooks),
   }));
   const unassignedBooks = books.filter((book) => book.section_id === null).sort(compareBooks);
+
+  const renderBookCards = (sectionId: string | null, sectionBooks: Book[]) => {
+    if (sectionBooks.length === 0) {
+      return (
+        <div
+          onDragOver={(event) => {
+            if (!canEditClass) return;
+            event.preventDefault();
+          }}
+          onDrop={() => {
+            if (!canEditClass) return;
+            void handleDropBook(sectionId);
+          }}
+          className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-sm text-gray-500"
+        >
+          No books in this section.
+        </div>
+      );
+    }
+
+    return (
+      <div
+        onDragOver={(event) => {
+          if (!canEditClass) return;
+          event.preventDefault();
+        }}
+        onDrop={() => {
+          if (!canEditClass) return;
+          void handleDropBook(sectionId);
+        }}
+        className="space-y-3"
+      >
+        {sectionBooks.map((book) => (
+          <div
+            key={book.id}
+            draggable={canEditClass}
+            onDragStart={() => {
+              if (!canEditClass) return;
+              setDraggedBook({ bookId: book.id, fromSectionId: sectionId });
+            }}
+            onDragEnd={() => setDraggedBook(null)}
+            onDragOver={(event) => {
+              if (!canEditClass) return;
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onDrop={(event) => {
+              if (!canEditClass) return;
+              event.preventDefault();
+              event.stopPropagation();
+              void handleDropBook(sectionId, book.id);
+            }}
+            className={`rounded-xl border bg-white p-4 shadow-sm transition ${draggedBook?.bookId === book.id ? 'opacity-60' : 'opacity-100'} ${canEditClass ? 'cursor-grab active:cursor-grabbing' : ''}`}
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start gap-3">
+                  {canEditClass && (
+                    <div className="pt-0.5 text-gray-400">
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h.01M8 12h.01M8 17h.01M16 7h.01M16 12h.01M16 17h.01" />
+                      </svg>
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    {editingBookId === book.id ? (
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={bookTitleDraft}
+                          onChange={(e) => setBookTitleDraft(e.target.value)}
+                          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <button
+                          onClick={handleRenameBook}
+                          className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    ) : (
+                      <h5 className="truncate text-base font-semibold text-gray-900">{book.title}</h5>
+                    )}
+                    <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                      <ProcessingStatusBadge
+                        bookId={book.id}
+                        initialStatus={book.processing_status}
+                        onStatusChange={(status) => {
+                          setBooks((currentBooks) =>
+                            currentBooks.map((currentBook) =>
+                              currentBook.id === book.id ? { ...currentBook, processing_status: status } : currentBook
+                            )
+                          );
+                        }}
+                      />
+                      <span>{formatFileSize(book.file_size)}</span>
+                      <span>Uploaded {formatDate(book.uploaded_at)}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Link
+                  href={`/dashboard/class/${slug}/book/${book.id}`}
+                  className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                >
+                  Open
+                </Link>
+                {canEditClass && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setEditingBookId(book.id);
+                        setBookTitleDraft(book.title);
+                      }}
+                      className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      onClick={() => void handleDeleteBook(book)}
+                      disabled={deletingBookId === book.id}
+                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deletingBookId === book.id ? 'Deleting...' : 'Delete'}
+                    </button>
+                    <select
+                      value={book.section_id ?? ''}
+                      onChange={(e) => void handleMoveBookToSection(book, e.target.value || null)}
+                      className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">Unassigned</option>
+                      {sectionOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.title}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -938,7 +1314,7 @@ export default function ClassPage() {
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5V4H2v16h5m10 0v-2a3 3 0 00-3-3H10a3 3 0 00-3 3v2m10 0H7m10-9a3 3 0 11-6 0 3 3 0 016 0zm-8 3a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    See Students
+                    Manage Access
                   </div>
                 </button>
               )}
@@ -995,12 +1371,23 @@ export default function ClassPage() {
                               <td className="px-4 py-4 text-sm text-gray-600">{formatDuration(recording.duration)}</td>
                               <td className="px-4 py-4 text-sm text-gray-600">{formatDate(recording.uploaded_at)}</td>
                               <td className="px-4 py-4 text-right">
-                                <Link
-                                  href={`/dashboard/class/${slug}/video/${recording.id}`}
-                                  className="inline-flex rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
-                                >
-                                  Open
-                                </Link>
+                                <div className="flex items-center justify-end gap-2">
+                                  <Link
+                                    href={`/dashboard/class/${slug}/video/${recording.id}`}
+                                    className="inline-flex rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                                  >
+                                    Open
+                                  </Link>
+                                  {canEditClass && (
+                                    <button
+                                      onClick={() => void handleDeleteRecording(recording)}
+                                      disabled={deletingRecordingId === recording.id}
+                                      className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      {deletingRecordingId === recording.id ? 'Deleting...' : 'Delete'}
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -1149,116 +1536,7 @@ export default function ClassPage() {
                         </div>
 
                         <div className="px-5 py-5">
-                          {section.books.length === 0 ? (
-                            <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                              No books in this section.
-                            </div>
-                          ) : (
-                            <div className="overflow-hidden rounded-lg border border-gray-200">
-                              <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-200">
-                                  <thead className="bg-gray-50">
-                                    <tr>
-                                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Title</th>
-                                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
-                                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Size</th>
-                                      <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Uploaded</th>
-                                      <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody className="divide-y divide-gray-200 bg-white">
-                                    {section.books.map((book, bookIndex) => (
-                                      <tr key={book.id} className="hover:bg-gray-50">
-                                        <td className="px-3 py-3 text-sm text-gray-900">
-                                          {editingBookId === book.id ? (
-                                            <div className="flex items-center gap-2">
-                                              <input
-                                                value={bookTitleDraft}
-                                                onChange={(e) => setBookTitleDraft(e.target.value)}
-                                                className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                              />
-                                              <button
-                                                onClick={handleRenameBook}
-                                                className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                                              >
-                                                Save
-                                              </button>
-                                            </div>
-                                          ) : (
-                                            <p className="font-medium">{book.title}</p>
-                                          )}
-                                        </td>
-                                        <td className="px-3 py-3 text-sm text-gray-600">
-                                          <ProcessingStatusBadge
-                                            bookId={book.id}
-                                            initialStatus={book.processing_status}
-                                            onStatusChange={(status) => {
-                                              setBooks((currentBooks) =>
-                                                currentBooks.map((currentBook) =>
-                                                  currentBook.id === book.id ? { ...currentBook, processing_status: status } : currentBook
-                                                )
-                                              );
-                                            }}
-                                          />
-                                        </td>
-                                        <td className="px-3 py-3 text-sm text-gray-600">{formatFileSize(book.file_size)}</td>
-                                        <td className="px-3 py-3 text-sm text-gray-600">{formatDate(book.uploaded_at)}</td>
-                                        <td className="px-3 py-3 text-right">
-                                          <div className="flex flex-wrap items-center justify-end gap-2">
-                                            <Link
-                                              href={`/dashboard/class/${slug}/book/${book.id}`}
-                                              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                                            >
-                                              Open
-                                            </Link>
-                                            {canEditClass && (
-                                              <>
-                                                <button
-                                                  onClick={() => {
-                                                    setEditingBookId(book.id);
-                                                    setBookTitleDraft(book.title);
-                                                  }}
-                                                  className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300"
-                                                >
-                                                  Rename
-                                                </button>
-                                                <button
-                                                  onClick={() => void handleMoveBook(section.id, book.id, 'up')}
-                                                  disabled={bookIndex === 0}
-                                                  className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                                                >
-                                                  Up
-                                                </button>
-                                                <button
-                                                  onClick={() => void handleMoveBook(section.id, book.id, 'down')}
-                                                  disabled={bookIndex === section.books.length - 1}
-                                                  className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                                                >
-                                                  Down
-                                                </button>
-                                                <select
-                                                  value={book.section_id ?? ''}
-                                                  onChange={(e) => void handleMoveBookToSection(book, e.target.value || null)}
-                                                  className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                                >
-                                                  <option value="">Unassigned</option>
-                                                  {sectionOptions.map((option) => (
-                                                    <option key={option.id} value={option.id}>
-                                                      {option.title}
-                                                    </option>
-                                                  ))}
-                                                </select>
-                                              </>
-                                            )}
-                                          </div>
-                                        </td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
-                            </div>
-                          )}
+                          {renderBookCards(section.id, section.books)}
                         </div>
                       </section>
                     ))}
@@ -1282,110 +1560,7 @@ export default function ClassPage() {
                         </div>
 
                         <div className="px-5 py-5">
-                          <div className="overflow-hidden rounded-lg border border-gray-200">
-                            <div className="overflow-x-auto">
-                              <table className="min-w-full divide-y divide-gray-200">
-                                <thead className="bg-gray-50">
-                                  <tr>
-                                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Title</th>
-                                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
-                                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Size</th>
-                                    <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Uploaded</th>
-                                    <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Actions</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-gray-200 bg-white">
-                                  {unassignedBooks.map((book, bookIndex) => (
-                                    <tr key={book.id} className="hover:bg-gray-50">
-                                      <td className="px-3 py-3 text-sm text-gray-900">
-                                        {editingBookId === book.id ? (
-                                          <div className="flex items-center gap-2">
-                                            <input
-                                              value={bookTitleDraft}
-                                              onChange={(e) => setBookTitleDraft(e.target.value)}
-                                              className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                            />
-                                            <button
-                                              onClick={handleRenameBook}
-                                              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                                            >
-                                              Save
-                                            </button>
-                                          </div>
-                                        ) : (
-                                          <p className="font-medium">{book.title}</p>
-                                        )}
-                                      </td>
-                                      <td className="px-3 py-3 text-sm text-gray-600">
-                                        <ProcessingStatusBadge
-                                          bookId={book.id}
-                                          initialStatus={book.processing_status}
-                                          onStatusChange={(status) => {
-                                            setBooks((currentBooks) =>
-                                              currentBooks.map((currentBook) =>
-                                                currentBook.id === book.id ? { ...currentBook, processing_status: status } : currentBook
-                                              )
-                                            );
-                                          }}
-                                        />
-                                      </td>
-                                      <td className="px-3 py-3 text-sm text-gray-600">{formatFileSize(book.file_size)}</td>
-                                      <td className="px-3 py-3 text-sm text-gray-600">{formatDate(book.uploaded_at)}</td>
-                                      <td className="px-3 py-3 text-right">
-                                        <div className="flex flex-wrap items-center justify-end gap-2">
-                                          <Link
-                                            href={`/dashboard/class/${slug}/book/${book.id}`}
-                                            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                                          >
-                                            Open
-                                          </Link>
-                                          {canEditClass && (
-                                            <>
-                                              <button
-                                                onClick={() => {
-                                                  setEditingBookId(book.id);
-                                                  setBookTitleDraft(book.title);
-                                                }}
-                                                className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300"
-                                              >
-                                                Rename
-                                              </button>
-                                              <button
-                                                onClick={() => void handleMoveBook(null, book.id, 'up')}
-                                                disabled={bookIndex === 0}
-                                                className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                                              >
-                                                Up
-                                              </button>
-                                              <button
-                                                onClick={() => void handleMoveBook(null, book.id, 'down')}
-                                                disabled={bookIndex === unassignedBooks.length - 1}
-                                                className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:opacity-50"
-                                              >
-                                                Down
-                                              </button>
-                                              <select
-                                                value={book.section_id ?? ''}
-                                                onChange={(e) => void handleMoveBookToSection(book, e.target.value || null)}
-                                                className="rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                              >
-                                                <option value="">Unassigned</option>
-                                                {sectionOptions.map((option) => (
-                                                  <option key={option.id} value={option.id}>
-                                                    {option.title}
-                                                  </option>
-                                                ))}
-                                              </select>
-                                            </>
-                                          )}
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
+                          {renderBookCards(null, unassignedBooks)}
                         </div>
                       </section>
                     )}
@@ -1434,40 +1609,43 @@ export default function ClassPage() {
               <div className="space-y-6">
                 <div className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 md:flex-row md:items-end">
                   <div className="flex-1">
-                    <label htmlFor="student-email" className="block text-sm font-medium text-gray-700 mb-1">
-                      Add User By Email
+                    <label htmlFor="member-email" className="block text-sm font-medium text-gray-700 mb-1">
+                      Add Student By Email
                     </label>
                     <input
-                      id="student-email"
+                      id="member-email"
                       type="email"
-                      value={studentEmail}
-                      onChange={(e) => setStudentEmail(e.target.value)}
+                      value={memberEmail}
+                      onChange={(e) => setMemberEmail(e.target.value)}
                       placeholder="student@example.com"
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />
                   </div>
                   <button
-                    onClick={handleAddStudent}
-                    disabled={addingStudent || !studentEmail.trim()}
+                    onClick={handleAddMember}
+                    disabled={addingMember || !memberEmail.trim()}
                     className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {addingStudent ? 'Adding...' : 'Add Student'}
+                    {addingMember ? 'Adding...' : 'Add Student'}
                   </button>
                 </div>
+                <p className="text-sm text-gray-500">
+                  Managers can add or remove students. Owners can also promote managers, demote them, and transfer ownership.
+                </p>
 
-                {studentError && (
+                {memberError && (
                   <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                    {studentError}
+                    {memberError}
                   </div>
                 )}
 
-                {studentsLoading ? (
+                {membersLoading ? (
                   <div className="text-center py-12 bg-gray-50 rounded-lg">
-                    <p className="text-gray-500">Loading students...</p>
+                    <p className="text-gray-500">Loading members...</p>
                   </div>
-                ) : students.length === 0 ? (
+                ) : members.length === 0 ? (
                   <div className="text-center py-12 bg-gray-50 rounded-lg">
-                    <p className="text-gray-500">No view-only students have been added to this class yet.</p>
+                    <p className="text-gray-500">No members have been added to this class yet.</p>
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-lg border border-gray-200">
@@ -1477,19 +1655,79 @@ export default function ClassPage() {
                           <tr>
                             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Email</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Access</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Role</th>
                             <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Added</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Action</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-200 bg-white">
-                          {students.map((student) => (
-                            <tr key={student.user_id} className="hover:bg-gray-50">
-                              <td className="px-4 py-4 text-sm font-medium text-gray-900">{student.name}</td>
-                              <td className="px-4 py-4 text-sm text-gray-600">{student.email}</td>
-                              <td className="px-4 py-4 text-sm text-gray-600">View only</td>
-                              <td className="px-4 py-4 text-sm text-gray-600">{formatDate(student.created_at)}</td>
-                            </tr>
-                          ))}
+                          {members.map((member) => {
+                            const isCurrentUser = member.user_id === currentUserId;
+                            const canRemoveMember = member.role === 'student' || (isOwner && member.role === 'manager');
+                            const canPromoteMember = isOwner && member.role === 'student';
+                            const canDemoteMember = isOwner && member.role === 'manager';
+                            const canTransferToMember = isOwner && member.role !== 'owner';
+                            const isBusy = updatingMemberId === member.user_id;
+
+                            return (
+                              <tr key={member.user_id} className="hover:bg-gray-50">
+                                <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                                  {member.name}
+                                  {isCurrentUser && <span className="ml-2 text-xs text-gray-500">(You)</span>}
+                                </td>
+                                <td className="px-4 py-4 text-sm text-gray-600">{member.email}</td>
+                                <td className="px-4 py-4 text-sm text-gray-600">
+                                  <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${memberRoleStyles[member.role].className}`}>
+                                    {memberRoleStyles[member.role].label}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-4 text-sm text-gray-600">{formatDate(member.created_at)}</td>
+                                <td className="px-4 py-4 text-right">
+                                  <div className="flex flex-wrap items-center justify-end gap-2">
+                                    {canPromoteMember && (
+                                      <button
+                                        onClick={() => void handleChangeMemberRole(member, 'manager')}
+                                        disabled={isBusy}
+                                        className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {isBusy ? 'Updating...' : 'Make Manager'}
+                                      </button>
+                                    )}
+                                    {canDemoteMember && (
+                                      <button
+                                        onClick={() => void handleChangeMemberRole(member, 'student')}
+                                        disabled={isBusy}
+                                        className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {isBusy ? 'Updating...' : 'Make Student'}
+                                      </button>
+                                    )}
+                                    {canTransferToMember && (
+                                      <button
+                                        onClick={() => void handleTransferOwnership(member)}
+                                        disabled={isBusy}
+                                        className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {isBusy ? 'Updating...' : 'Transfer Ownership'}
+                                      </button>
+                                    )}
+                                    {canRemoveMember && (
+                                      <button
+                                        onClick={() => void handleRemoveMember(member)}
+                                        disabled={isBusy}
+                                        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        {isBusy ? 'Updating...' : 'Remove'}
+                                      </button>
+                                    )}
+                                    {!canPromoteMember && !canDemoteMember && !canTransferToMember && !canRemoveMember && (
+                                      <span className="text-xs text-gray-400">No actions</span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

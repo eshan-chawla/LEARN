@@ -22,11 +22,19 @@ DROP FUNCTION IF EXISTS update_updated_at_column() CASCADE;
 DROP FUNCTION IF EXISTS sync_auth_user_to_public_users() CASCADE;
 DROP FUNCTION IF EXISTS can_view_class(UUID) CASCADE;
 DROP FUNCTION IF EXISTS can_edit_class(UUID) CASCADE;
+DROP FUNCTION IF EXISTS get_class_role(UUID) CASCADE;
+DROP FUNCTION IF EXISTS can_manage_class_members(UUID) CASCADE;
+DROP FUNCTION IF EXISTS is_class_owner(UUID) CASCADE;
 DROP FUNCTION IF EXISTS is_teacher_user(UUID) CASCADE;
 DROP FUNCTION IF EXISTS create_class(TEXT, TEXT, TEXT) CASCADE;
 DROP FUNCTION IF EXISTS grant_class_owner_membership() CASCADE;
 DROP FUNCTION IF EXISTS list_class_viewers(UUID) CASCADE;
+DROP FUNCTION IF EXISTS list_class_members(UUID) CASCADE;
 DROP FUNCTION IF EXISTS add_user_to_class_by_email(UUID, TEXT, BOOLEAN) CASCADE;
+DROP FUNCTION IF EXISTS add_user_to_class_by_email(UUID, TEXT, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS update_class_member_role(UUID, UUID, TEXT) CASCADE;
+DROP FUNCTION IF EXISTS remove_user_from_class(UUID, UUID) CASCADE;
+DROP FUNCTION IF EXISTS transfer_class_ownership(UUID, UUID) CASCADE;
 
 -- Success message
 SELECT 'All tables and functions have been deleted!' as status;

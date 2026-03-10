@@ -1,4 +1,4 @@
-import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -92,6 +92,62 @@ export async function GET(
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to fetch recording';
     console.error('Error fetching recording:', error);
+    return NextResponse.json(
+      { error: message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ recordingId: string }> }
+) {
+  try {
+    const { recordingId } = await params;
+
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const { data: recording, error: recordingError } = await supabase
+      .from('recordings')
+      .select('id, storage_path')
+      .eq('id', recordingId)
+      .single();
+
+    if (recordingError || !recording) {
+      return NextResponse.json({ error: 'Recording not found' }, { status: 404 });
+    }
+
+    if (recording.storage_path) {
+      const command = new DeleteObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: recording.storage_path,
+      });
+
+      await s3.send(command);
+    }
+
+    const { error: deleteError } = await supabase
+      .from('recordings')
+      .delete()
+      .eq('id', recordingId);
+
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message || 'Failed to delete recording' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to delete recording';
+    console.error('Error deleting recording:', error);
     return NextResponse.json(
       { error: message },
       { status: 500 }

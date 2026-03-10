@@ -44,7 +44,7 @@ CREATE TABLE book_sections (
 CREATE TABLE user_class (
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   class_id UUID NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
-  can_edit BOOLEAN NOT NULL DEFAULT FALSE,
+  role TEXT NOT NULL DEFAULT 'student' CHECK (role IN ('owner', 'manager', 'student')),
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (user_id, class_id)
@@ -181,8 +181,52 @@ AS $$
     FROM public.user_class
     WHERE user_class.class_id = target_class_id
       AND user_class.user_id = auth.uid()
-      AND user_class.can_edit = TRUE
+      AND user_class.role IN ('owner', 'manager')
   );
+$$;
+
+CREATE OR REPLACE FUNCTION get_class_role(target_class_id UUID)
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT CASE
+    WHEN EXISTS (
+      SELECT 1
+      FROM public.classes
+      WHERE classes.id = target_class_id
+        AND classes.user_id = auth.uid()
+    ) THEN 'owner'
+    ELSE (
+      SELECT user_class.role
+      FROM public.user_class
+      WHERE user_class.class_id = target_class_id
+        AND user_class.user_id = auth.uid()
+      LIMIT 1
+    )
+  END;
+$$;
+
+CREATE OR REPLACE FUNCTION can_manage_class_members(target_class_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(get_class_role(target_class_id), '') IN ('owner', 'manager');
+$$;
+
+CREATE OR REPLACE FUNCTION is_class_owner(target_class_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT COALESCE(get_class_role(target_class_id), '') = 'owner';
 $$;
 
 CREATE OR REPLACE FUNCTION is_teacher_user(target_user_id UUID)
@@ -236,23 +280,23 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  INSERT INTO public.user_class (user_id, class_id, can_edit)
-  VALUES (NEW.user_id, NEW.id, TRUE)
+  INSERT INTO public.user_class (user_id, class_id, role)
+  VALUES (NEW.user_id, NEW.id, 'owner')
   ON CONFLICT (user_id, class_id) DO UPDATE
   SET
-    can_edit = TRUE,
+    role = 'owner',
     updated_at = NOW();
 
   RETURN NEW;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION list_class_viewers(target_class_id UUID)
+CREATE OR REPLACE FUNCTION list_class_members(target_class_id UUID)
 RETURNS TABLE (
   user_id UUID,
   email TEXT,
   name TEXT,
-  can_edit BOOLEAN,
+  role TEXT,
   created_at TIMESTAMPTZ
 )
 LANGUAGE plpgsql
@@ -261,8 +305,8 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 BEGIN
-  IF NOT can_edit_class(target_class_id) THEN
-    RAISE EXCEPTION 'Unauthorized to list class viewers';
+  IF NOT can_manage_class_members(target_class_id) THEN
+    RAISE EXCEPTION 'Unauthorized to list class members';
   END IF;
 
   RETURN QUERY
@@ -270,38 +314,70 @@ BEGIN
     users.id,
     users.email,
     users.name,
-    user_class.can_edit,
+    user_class.role,
     user_class.created_at
   FROM user_class
   JOIN users ON users.id = user_class.user_id
   WHERE user_class.class_id = target_class_id
-    AND user_class.can_edit = FALSE
-  ORDER BY LOWER(users.name), LOWER(users.email);
+  ORDER BY
+    CASE user_class.role
+      WHEN 'owner' THEN 0
+      WHEN 'manager' THEN 1
+      ELSE 2
+    END,
+    LOWER(users.name),
+    LOWER(users.email);
 END;
 $$;
 
 DROP FUNCTION IF EXISTS add_user_to_class_by_email(UUID, TEXT, BOOLEAN);
+DROP FUNCTION IF EXISTS add_user_to_class_by_email(UUID, TEXT, TEXT);
 CREATE FUNCTION add_user_to_class_by_email(
   target_class_id UUID,
   target_email TEXT,
-  target_can_edit BOOLEAN DEFAULT FALSE
+  target_role TEXT DEFAULT 'student'
 )
 RETURNS TABLE (
   added_user_id UUID,
   added_email TEXT,
   added_name TEXT,
   added_class_id UUID,
-  added_can_edit BOOLEAN
+  added_role TEXT
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
+  actor_role TEXT;
+  existing_role TEXT;
   matched_user users%ROWTYPE;
+  normalized_target_role TEXT;
+  class_owner_id UUID;
 BEGIN
-  IF NOT can_edit_class(target_class_id) THEN
+  actor_role := get_class_role(target_class_id);
+
+  IF actor_role NOT IN ('owner', 'manager') THEN
     RAISE EXCEPTION 'Unauthorized to add users to this class';
+  END IF;
+
+  normalized_target_role := LOWER(TRIM(COALESCE(target_role, 'student')));
+
+  IF normalized_target_role NOT IN ('student', 'manager') THEN
+    RAISE EXCEPTION 'Invalid role. Use student or manager';
+  END IF;
+
+  IF actor_role = 'manager' AND normalized_target_role <> 'student' THEN
+    RAISE EXCEPTION 'Managers can only add students';
+  END IF;
+
+  SELECT user_id
+  INTO class_owner_id
+  FROM classes
+  WHERE id = target_class_id;
+
+  IF class_owner_id IS NULL THEN
+    RAISE EXCEPTION 'Class not found';
   END IF;
 
   SELECT *
@@ -314,11 +390,36 @@ BEGIN
     RAISE EXCEPTION 'No user found for the provided email';
   END IF;
 
-  INSERT INTO user_class (user_id, class_id, can_edit)
-  VALUES (matched_user.id, target_class_id, target_can_edit)
+  IF matched_user.id = class_owner_id THEN
+    RAISE EXCEPTION 'The class owner already has access';
+  END IF;
+
+  SELECT user_class.role
+  INTO existing_role
+  FROM user_class
+  WHERE user_class.user_id = matched_user.id
+    AND user_class.class_id = target_class_id;
+
+  IF actor_role = 'manager' AND existing_role = 'manager' THEN
+    RAISE EXCEPTION 'Managers cannot change another manager''s access';
+  END IF;
+
+  IF actor_role = 'manager' AND existing_role = 'student' THEN
+    RETURN QUERY
+    SELECT
+      matched_user.id,
+      matched_user.email,
+      matched_user.name,
+      target_class_id,
+      existing_role;
+    RETURN;
+  END IF;
+
+  INSERT INTO user_class (user_id, class_id, role)
+  VALUES (matched_user.id, target_class_id, normalized_target_role)
   ON CONFLICT (user_id, class_id) DO UPDATE
   SET
-    can_edit = user_class.can_edit OR EXCLUDED.can_edit,
+    role = EXCLUDED.role,
     updated_at = NOW();
 
   RETURN QUERY
@@ -327,10 +428,199 @@ BEGIN
     matched_user.email,
     matched_user.name,
     target_class_id,
-    uc.can_edit
+    uc.role
   FROM user_class AS uc
   WHERE uc.user_id = matched_user.id
     AND uc.class_id = target_class_id;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS update_class_member_role(UUID, UUID, TEXT);
+CREATE FUNCTION update_class_member_role(
+  target_class_id UUID,
+  target_user_id UUID,
+  target_role TEXT
+)
+RETURNS TABLE (
+  updated_user_id UUID,
+  updated_email TEXT,
+  updated_name TEXT,
+  updated_class_id UUID,
+  updated_role TEXT
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  matched_user users%ROWTYPE;
+  existing_role TEXT;
+  normalized_target_role TEXT;
+BEGIN
+  IF NOT is_class_owner(target_class_id) THEN
+    RAISE EXCEPTION 'Only the class owner can change member roles';
+  END IF;
+
+  normalized_target_role := LOWER(TRIM(COALESCE(target_role, '')));
+
+  IF normalized_target_role NOT IN ('student', 'manager') THEN
+    RAISE EXCEPTION 'Invalid role. Use student or manager';
+  END IF;
+
+  SELECT *
+  INTO matched_user
+  FROM users
+  WHERE users.id = target_user_id
+  LIMIT 1;
+
+  IF matched_user.id IS NULL THEN
+    RAISE EXCEPTION 'User not found';
+  END IF;
+
+  SELECT user_class.role
+  INTO existing_role
+  FROM user_class
+  WHERE user_class.user_id = target_user_id
+    AND user_class.class_id = target_class_id;
+
+  IF existing_role IS NULL THEN
+    RAISE EXCEPTION 'User is not enrolled in this class';
+  END IF;
+
+  IF existing_role = 'owner' THEN
+    RAISE EXCEPTION 'Use ownership transfer to change the owner';
+  END IF;
+
+  UPDATE user_class
+  SET
+    role = normalized_target_role,
+    updated_at = NOW()
+  WHERE class_id = target_class_id
+    AND user_id = target_user_id;
+
+  RETURN QUERY
+  SELECT
+    matched_user.id,
+    matched_user.email,
+    matched_user.name,
+    target_class_id,
+    normalized_target_role;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS remove_user_from_class(UUID, UUID);
+CREATE FUNCTION remove_user_from_class(
+  target_class_id UUID,
+  target_user_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  actor_role TEXT;
+  target_role TEXT;
+BEGIN
+  actor_role := get_class_role(target_class_id);
+
+  IF actor_role NOT IN ('owner', 'manager') THEN
+    RAISE EXCEPTION 'Unauthorized to remove users from this class';
+  END IF;
+
+  SELECT user_class.role
+  INTO target_role
+  FROM user_class
+  WHERE user_class.class_id = target_class_id
+    AND user_class.user_id = target_user_id;
+
+  IF target_role IS NULL THEN
+    RETURN FALSE;
+  END IF;
+
+  IF target_role = 'owner' THEN
+    RAISE EXCEPTION 'Cannot remove the class owner';
+  END IF;
+
+  IF actor_role = 'manager' AND target_role <> 'student' THEN
+    RAISE EXCEPTION 'Managers can only remove students';
+  END IF;
+
+  DELETE FROM user_class
+  WHERE class_id = target_class_id
+    AND user_id = target_user_id;
+
+  RETURN FOUND;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS transfer_class_ownership(UUID, UUID);
+CREATE FUNCTION transfer_class_ownership(
+  target_class_id UUID,
+  target_user_id UUID
+)
+RETURNS TABLE (
+  previous_owner_id UUID,
+  new_owner_id UUID,
+  class_id UUID
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  current_owner_id UUID;
+  target_member_role TEXT;
+BEGIN
+  IF NOT is_class_owner(target_class_id) THEN
+    RAISE EXCEPTION 'Only the class owner can transfer ownership';
+  END IF;
+
+  SELECT classes.user_id
+  INTO current_owner_id
+  FROM classes
+  WHERE classes.id = target_class_id;
+
+  IF current_owner_id IS NULL THEN
+    RAISE EXCEPTION 'Class not found';
+  END IF;
+
+  IF current_owner_id = target_user_id THEN
+    RAISE EXCEPTION 'This user already owns the class';
+  END IF;
+
+  SELECT user_class.role
+  INTO target_member_role
+  FROM user_class
+  WHERE user_class.class_id = target_class_id
+    AND user_class.user_id = target_user_id;
+
+  IF target_member_role IS NULL THEN
+    RAISE EXCEPTION 'Transfer ownership only to an existing class member';
+  END IF;
+
+  UPDATE classes
+  SET
+    user_id = target_user_id,
+    updated_at = NOW()
+  WHERE id = target_class_id;
+
+  UPDATE user_class
+  SET
+    role = 'manager',
+    updated_at = NOW()
+  WHERE class_id = target_class_id
+    AND user_id = current_owner_id;
+
+  UPDATE user_class
+  SET
+    role = 'owner',
+    updated_at = NOW()
+  WHERE class_id = target_class_id
+    AND user_id = target_user_id;
+
+  RETURN QUERY
+  SELECT current_owner_id, target_user_id, target_class_id;
 END;
 $$;
 
@@ -397,12 +687,12 @@ SET
   name = COALESCE(EXCLUDED.name, public.users.name),
   updated_at = NOW();
 
-INSERT INTO public.user_class (user_id, class_id, can_edit)
-SELECT user_id, id, TRUE
+INSERT INTO public.user_class (user_id, class_id, role)
+SELECT user_id, id, 'owner'
 FROM public.classes
 ON CONFLICT (user_id, class_id) DO UPDATE
 SET
-  can_edit = TRUE,
+  role = 'owner',
   updated_at = NOW();
 
 -- ============================================================================
@@ -464,54 +754,21 @@ CREATE POLICY "Users can view memberships for accessible classes"
   ON user_class FOR SELECT
   USING (
     auth.uid() = user_id
-    OR EXISTS (
-      SELECT 1
-      FROM classes
-      WHERE classes.id = user_class.class_id
-        AND classes.user_id = auth.uid()
-    )
+    OR can_manage_class_members(class_id)
   );
 
 CREATE POLICY "Class owners can add memberships"
   ON user_class FOR INSERT
-  WITH CHECK (
-    EXISTS (
-      SELECT 1
-      FROM classes
-      WHERE classes.id = user_class.class_id
-        AND classes.user_id = auth.uid()
-    )
-  );
+  WITH CHECK (is_class_owner(class_id));
 
 CREATE POLICY "Class owners can update memberships"
   ON user_class FOR UPDATE
-  USING (
-    EXISTS (
-      SELECT 1
-      FROM classes
-      WHERE classes.id = user_class.class_id
-        AND classes.user_id = auth.uid()
-    )
-  )
-  WITH CHECK (
-    EXISTS (
-      SELECT 1
-      FROM classes
-      WHERE classes.id = user_class.class_id
-        AND classes.user_id = auth.uid()
-    )
-  );
+  USING (is_class_owner(class_id))
+  WITH CHECK (is_class_owner(class_id));
 
 CREATE POLICY "Class owners can delete memberships"
   ON user_class FOR DELETE
-  USING (
-    EXISTS (
-      SELECT 1
-      FROM classes
-      WHERE classes.id = user_class.class_id
-        AND classes.user_id = auth.uid()
-    )
-  );
+  USING (is_class_owner(class_id));
 
 -- ============================================================================
 -- RLS POLICIES: CLASSES
@@ -530,8 +787,8 @@ CREATE POLICY "Users can create their own classes"
 
 CREATE POLICY "Users can update their own classes"
   ON classes FOR UPDATE
-  USING (can_edit_class(id))
-  WITH CHECK (can_edit_class(id));
+  USING (is_class_owner(id))
+  WITH CHECK (is_class_owner(id));
 
 CREATE POLICY "Users can delete their own classes"
   ON classes FOR DELETE
@@ -607,7 +864,7 @@ CREATE POLICY "Users can delete notes of their classes"
 COMMENT ON TABLE classes IS 'Classes created by users';
 COMMENT ON TABLE users IS 'Application user profiles synced from auth.users';
 COMMENT ON TABLE book_sections IS 'Ordered sections inside a class that group books';
-COMMENT ON TABLE user_class IS 'Maps users to classes with viewer/editor access';
+COMMENT ON TABLE user_class IS 'Maps users to classes with owner, manager, or student access';
 COMMENT ON TABLE recordings IS 'Video recordings for classes';
 COMMENT ON TABLE books IS 'PDF books/documents for classes';
 COMMENT ON TABLE notes IS 'Text notes for classes (one per class)';
@@ -615,15 +872,18 @@ COMMENT ON TABLE notes IS 'Text notes for classes (one per class)';
 COMMENT ON COLUMN classes.user_id IS 'UUID of the user who owns this class (matches auth.users.id)';
 COMMENT ON COLUMN users.is_teacher IS 'Only teachers can create classes';
 COMMENT ON COLUMN book_sections.position IS 'Display order of the section inside the class';
-COMMENT ON COLUMN user_class.can_edit IS 'TRUE means the user can edit class content; FALSE means view-only access';
+COMMENT ON COLUMN user_class.role IS 'owner can manage roles and transfer ownership; manager can edit class content and add/remove students; student has view-only access';
 COMMENT ON COLUMN classes.slug IS 'URL-friendly slug for the class';
 COMMENT ON COLUMN books.processing_status IS 'Status of PDF processing: pending, processing, completed, or failed';
 COMMENT ON COLUMN books.error_message IS 'Error details if processing_status is failed';
 COMMENT ON COLUMN books.storage_path IS 'S3 key for the PDF (e.g., books/class-id/file.pdf)';
 COMMENT ON COLUMN books.position IS 'Display order of the book inside its section';
 COMMENT ON FUNCTION create_class(TEXT, TEXT, TEXT) IS 'Creates a class for the current authenticated teacher user';
-COMMENT ON FUNCTION list_class_viewers(UUID) IS 'Returns view-only class members for editors of that class';
-COMMENT ON FUNCTION add_user_to_class_by_email(UUID, TEXT, BOOLEAN) IS 'Adds an existing user to a class by email for editors of that class';
+COMMENT ON FUNCTION list_class_members(UUID) IS 'Returns class members and roles for owners or managers of that class';
+COMMENT ON FUNCTION add_user_to_class_by_email(UUID, TEXT, TEXT) IS 'Adds an existing user to a class by email; managers can add students and owners can add students or managers';
+COMMENT ON FUNCTION update_class_member_role(UUID, UUID, TEXT) IS 'Allows the class owner to promote or demote members between student and manager';
+COMMENT ON FUNCTION remove_user_from_class(UUID, UUID) IS 'Allows owners or managers to remove members according to their role permissions';
+COMMENT ON FUNCTION transfer_class_ownership(UUID, UUID) IS 'Transfers class ownership to another existing member and demotes the previous owner to manager';
 
 -- ============================================================================
 -- SUCCESS MESSAGE

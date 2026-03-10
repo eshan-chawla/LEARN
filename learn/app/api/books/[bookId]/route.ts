@@ -1,4 +1,4 @@
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -91,6 +91,62 @@ export async function GET(
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : 'Failed to fetch book';
     console.error('Error fetching book:', error);
+    return NextResponse.json(
+      { error: message },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: NextRequest,
+  { params }: { params: Promise<{ bookId: string }> }
+) {
+  try {
+    const { bookId } = await params;
+
+    const authHeader = request.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const { data: book, error: bookError } = await supabase
+      .from('books')
+      .select('id, storage_path')
+      .eq('id', bookId)
+      .single();
+
+    if (bookError || !book) {
+      return NextResponse.json({ error: 'Book not found' }, { status: 404 });
+    }
+
+    if (book.storage_path) {
+      const command = new DeleteObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: book.storage_path,
+      });
+
+      await s3.send(command);
+    }
+
+    const { error: deleteError } = await supabase
+      .from('books')
+      .delete()
+      .eq('id', bookId);
+
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message || 'Failed to delete book' }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to delete book';
+    console.error('Error deleting book:', error);
     return NextResponse.json(
       { error: message },
       { status: 500 }
