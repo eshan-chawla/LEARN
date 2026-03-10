@@ -11,53 +11,123 @@ interface VideoUploadModalProps {
 }
 
 export function VideoUploadModal({ classId, isOpen, onClose, onSuccess }: VideoUploadModalProps) {
-  const [title, setTitle] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [currentFileLabel, setCurrentFileLabel] = useState('');
   const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
+  const formatSize = (size: number) => `${(size / 1024 / 1024).toFixed(2)} MB`;
+
+  const getVideoTitle = (filename: string) => filename.replace(/\.mp4$/i, '');
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      // Validate file type (mp4 only for now)
-      if (selectedFile.type !== 'video/mp4') {
-        setError('Please select an MP4 video file');
+    const selectedFiles = Array.from(e.target.files || []);
+
+    if (selectedFiles.length > 0) {
+      const invalidTypeFile = selectedFiles.find((selectedFile) => selectedFile.type !== 'video/mp4');
+      if (invalidTypeFile) {
+        setError(`Only MP4 files are allowed: ${invalidTypeFile.name}`);
         return;
       }
 
       // Validate file size (500 MB limit — must match Supabase bucket file_size_limit)
       const maxSize = 500 * 1024 * 1024; // 500 MB
-      if (selectedFile.size > maxSize) {
-        setError(`File size must be less than 500 MB (your file is ${(selectedFile.size / 1024 / 1024).toFixed(0)} MB)`);
+      const oversizedFile = selectedFiles.find((selectedFile) => selectedFile.size > maxSize);
+      if (oversizedFile) {
+        setError(`File size must be less than 500 MB (${oversizedFile.name} is ${formatSize(oversizedFile.size)})`);
         return;
       }
 
-      setFile(selectedFile);
+      setFiles(selectedFiles);
       setError('');
-
-      // Auto-fill title from filename if empty
-      if (!title) {
-        const filename = selectedFile.name.replace('.mp4', '');
-        setTitle(filename);
-      }
     }
   };
 
+  const getDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.onloadedmetadata = () => {
+        window.URL.revokeObjectURL(video.src);
+        resolve(Math.floor(video.duration));
+      };
+      video.src = URL.createObjectURL(file);
+    });
+  };
+
+  const uploadSingleFile = async (file: File, index: number, total: number) => {
+    const baseProgress = Math.floor((index / total) * 100);
+    const progressSlice = Math.ceil(100 / total);
+
+    setCurrentFileLabel(file.name);
+    setUploadProgress(Math.min(baseProgress + 5, 100));
+
+    const presignRes = await fetch('/api/upload-asset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: file.name,
+        contentType: file.type,
+        classId,
+        type: 'video',
+      }),
+    });
+
+    if (!presignRes.ok) {
+      const err = await presignRes.json();
+      throw new Error(err.error || `Failed to get upload URL for ${file.name}`);
+    }
+
+    const { presignedUrl, storagePath } = await presignRes.json();
+
+    setUploadProgress(Math.min(baseProgress + Math.floor(progressSlice * 0.35), 100));
+
+    const s3Res = await fetch(presignedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+
+    if (!s3Res.ok) {
+      throw new Error(`S3 upload failed for ${file.name}: ${s3Res.status} ${s3Res.statusText}`);
+    }
+
+    setUploadProgress(Math.min(baseProgress + Math.floor(progressSlice * 0.7), 100));
+
+    const duration = await getDuration(file);
+
+    const { error: recordingError } = await supabase
+      .from('recordings')
+      .insert({
+        class_id: classId,
+        title: getVideoTitle(file.name),
+        video_url: storagePath,
+        storage_path: storagePath,
+        duration,
+        processing_status: 'pending',
+      })
+      .select()
+      .single();
+
+    if (recordingError) throw recordingError;
+
+    setUploadProgress(Math.min(baseProgress + progressSlice, 100));
+  };
+
   const handleUpload = async () => {
-    if (!file || !title.trim()) {
-      setError('Please provide both a title and a file');
+    if (files.length === 0) {
+      setError('Please select at least one MP4 file');
       return;
     }
 
     try {
       setUploading(true);
       setError('');
-      setUploadProgress(5);
+      setUploadProgress(0);
 
-      // Verify the user has an active Supabase session before uploading
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !sessionData?.session?.user) {
         setError('Your session has expired. Please sign out and sign back in.');
@@ -66,104 +136,33 @@ export function VideoUploadModal({ classId, isOpen, onClose, onSuccess }: VideoU
         return;
       }
 
-      console.log('Uploading as user:', sessionData.session.user.id);
-      setUploadProgress(10);
-
-      setUploadProgress(20);
-
-      // Step 1: Get a pre-signed S3 URL from our API route
-      const presignRes = await fetch('/api/upload-asset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type,
-          classId,
-          type: 'video',
-        }),
-      });
-
-      if (!presignRes.ok) {
-        const err = await presignRes.json();
-        throw new Error(err.error || 'Failed to get upload URL');
+      for (const [index, file] of files.entries()) {
+        await uploadSingleFile(file, index, files.length);
       }
-
-      const { presignedUrl, storagePath } = await presignRes.json();
-
-      setUploadProgress(35);
-
-      // Step 2: Upload directly to S3 using the pre-signed URL
-      // This bypasses Supabase's 50MB free tier limit entirely
-      const s3Res = await fetch(presignedUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      });
-
-      if (!s3Res.ok) {
-        throw new Error(`S3 upload failed: ${s3Res.status} ${s3Res.statusText}`);
-      }
-
-      setUploadProgress(70);
-
-      // Create video element to get duration
-      const video = document.createElement('video');
-      video.preload = 'metadata';
-
-      const getDuration = (): Promise<number> => {
-        return new Promise((resolve) => {
-          video.onloadedmetadata = () => {
-            window.URL.revokeObjectURL(video.src);
-            resolve(Math.floor(video.duration));
-          };
-          video.src = URL.createObjectURL(file);
-        });
-      };
-
-      const duration = await getDuration();
-
-      setUploadProgress(80);
-
-      // Create recording record in database
-      const { error: recordingError } = await supabase
-        .from('recordings')
-        .insert({
-          class_id: classId,
-          title: title.trim(),
-          video_url: storagePath, // Store the storage path
-          storage_path: storagePath,
-          duration: duration,
-          processing_status: 'pending'
-        })
-        .select()
-        .single();
-
-      if (recordingError) throw recordingError;
 
       setUploadProgress(100);
 
-      // Success!
       setTimeout(() => {
         onSuccess();
         handleClose();
       }, 500);
-
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to upload video';
+      const message = err instanceof Error ? err.message : 'Failed to upload video files';
       console.error('Upload error:', err);
       setError(message);
       setUploadProgress(0);
     } finally {
       setUploading(false);
+      setCurrentFileLabel('');
     }
   };
 
   const handleClose = () => {
     if (!uploading) {
-      setTitle('');
-      setFile(null);
+      setFiles([]);
       setError('');
       setUploadProgress(0);
+      setCurrentFileLabel('');
       onClose();
     }
   };
@@ -187,39 +186,28 @@ export function VideoUploadModal({ classId, isOpen, onClose, onSuccess }: VideoU
 
         {/* Body */}
         <div className="px-6 py-4 space-y-4">
-          {/* Title Input */}
-          <div>
-            <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
-              Video Title
-            </label>
-            <input
-              type="text"
-              id="title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Lecture 1: Introduction"
-              disabled={uploading}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 disabled:bg-gray-100"
-            />
-          </div>
-
           {/* File Input */}
           <div>
             <label htmlFor="file" className="block text-sm font-medium text-gray-700 mb-1">
-              Video File (MP4)
+              Video Files (MP4)
             </label>
             <input
               type="file"
               id="file"
               accept="video/mp4"
+              multiple
               onChange={handleFileChange}
               disabled={uploading}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 disabled:bg-gray-100"
             />
-            {file && (
-              <p className="text-sm text-gray-500 mt-1">
-                {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-              </p>
+            {files.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {files.map((file) => (
+                  <p key={`${file.name}-${file.size}`} className="text-sm text-gray-500 mt-1">
+                    {file.name} ({formatSize(file.size)})
+                  </p>
+                ))}
+              </div>
             )}
           </div>
 
@@ -227,7 +215,7 @@ export function VideoUploadModal({ classId, isOpen, onClose, onSuccess }: VideoU
           {uploading && (
             <div>
               <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
-                <span>Uploading...</span>
+                <span>{currentFileLabel ? `Uploading ${currentFileLabel}...` : 'Uploading videos...'}</span>
                 <span>{uploadProgress}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -249,7 +237,7 @@ export function VideoUploadModal({ classId, isOpen, onClose, onSuccess }: VideoU
           {/* Info Message */}
           <div className="bg-blue-50 border border-blue-200 rounded-md p-3">
             <p className="text-sm text-blue-700">
-              Video will be stored in Supabase Storage. Future processing features will be added.
+              Videos are uploaded directly to AWS S3 and each filename becomes the recording title automatically.
             </p>
           </div>
         </div>
@@ -265,10 +253,10 @@ export function VideoUploadModal({ classId, isOpen, onClose, onSuccess }: VideoU
           </button>
           <button
             onClick={handleUpload}
-            disabled={uploading || !file || !title.trim()}
+            disabled={uploading || files.length === 0}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {uploading ? 'Uploading...' : 'Upload'}
+            {uploading ? 'Uploading...' : files.length > 1 ? `Upload ${files.length} Videos` : 'Upload Video'}
           </button>
         </div>
       </div>

@@ -11,50 +11,122 @@ interface PdfUploadModalProps {
 }
 
 export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploadModalProps) {
-  const [title, setTitle] = useState('');
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [currentFileLabel, setCurrentFileLabel] = useState('');
   const [error, setError] = useState('');
 
   if (!isOpen) return null;
 
+  const formatSize = (size: number) => `${(size / 1024 / 1024).toFixed(2)} MB`;
+
+  const getBookTitle = (filename: string) => filename.replace(/\.pdf$/i, '');
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0];
-    if (selectedFile) {
-      if (selectedFile.type !== 'application/pdf') {
-        setError('Please select a PDF file');
+    const selectedFiles = Array.from(e.target.files || []);
+
+    if (selectedFiles.length > 0) {
+      const invalidTypeFile = selectedFiles.find((selectedFile) => selectedFile.type !== 'application/pdf');
+      if (invalidTypeFile) {
+        setError(`Only PDF files are allowed: ${invalidTypeFile.name}`);
         return;
       }
 
       // 500 MB limit — uploads go to S3, not Supabase
       const maxSize = 500 * 1024 * 1024;
-      if (selectedFile.size > maxSize) {
-        setError(`File size must be less than 500 MB (your file is ${(selectedFile.size / 1024 / 1024).toFixed(0)} MB)`);
+      const oversizedFile = selectedFiles.find((selectedFile) => selectedFile.size > maxSize);
+      if (oversizedFile) {
+        setError(`File size must be less than 500 MB (${oversizedFile.name} is ${formatSize(oversizedFile.size)})`);
         return;
       }
 
-      setFile(selectedFile);
+      setFiles(selectedFiles);
       setError('');
-
-      if (!title) {
-        setTitle(selectedFile.name.replace('.pdf', ''));
-      }
     }
   };
 
+  const uploadSingleFile = async (file: File, index: number, total: number) => {
+    const baseProgress = Math.floor((index / total) * 100);
+    const progressSlice = Math.ceil(100 / total);
+
+    setCurrentFileLabel(file.name);
+    setUploadProgress(Math.min(baseProgress + 5, 100));
+
+    const presignRes = await fetch('/api/upload-asset', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: file.name,
+        contentType: file.type,
+        classId,
+        type: 'pdf',
+      }),
+    });
+
+    if (!presignRes.ok) {
+      const err = await presignRes.json();
+      throw new Error(err.error || `Failed to get upload URL for ${file.name}`);
+    }
+
+    const { presignedUrl, publicUrl, storagePath } = await presignRes.json();
+
+    setUploadProgress(Math.min(baseProgress + Math.floor(progressSlice * 0.35), 100));
+
+    const s3Res = await fetch(presignedUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': file.type },
+      body: file,
+    });
+
+    if (!s3Res.ok) {
+      throw new Error(`S3 upload failed for ${file.name}: ${s3Res.status} ${s3Res.statusText}`);
+    }
+
+    setUploadProgress(Math.min(baseProgress + Math.floor(progressSlice * 0.7), 100));
+
+    const { data: bookData, error: bookError } = await supabase
+      .from('books')
+      .insert({
+        class_id: classId,
+        title: getBookTitle(file.name),
+        pdf_url: publicUrl,
+        storage_path: storagePath,
+        file_size: file.size,
+        processing_status: 'pending',
+      })
+      .select()
+      .single();
+
+    if (bookError) throw bookError;
+
+    const processRes = await fetch('/api/process-pdf', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        book_id: bookData.id,
+        storage_path: storagePath,
+      }),
+    });
+
+    if (!processRes.ok) {
+      console.warn('PDF processing trigger failed:', await processRes.json());
+    }
+
+    setUploadProgress(Math.min(baseProgress + progressSlice, 100));
+  };
+
   const handleUpload = async () => {
-    if (!file || !title.trim()) {
-      setError('Please provide both a title and a file');
+    if (files.length === 0) {
+      setError('Please select at least one PDF file');
       return;
     }
 
     try {
       setUploading(true);
       setError('');
-      setUploadProgress(5);
+      setUploadProgress(0);
 
-      // Verify active Supabase session
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       if (sessionError || !sessionData?.session?.user) {
         setError('Your session has expired. Please sign out and sign back in.');
@@ -63,74 +135,8 @@ export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploa
         return;
       }
 
-      setUploadProgress(10);
-
-      // Step 1: Get a pre-signed S3 PUT URL from our API
-      const presignRes = await fetch('/api/upload-asset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          filename: file.name,
-          contentType: file.type,
-          classId,
-          type: 'pdf',
-        }),
-      });
-
-      if (!presignRes.ok) {
-        const err = await presignRes.json();
-        throw new Error(err.error || 'Failed to get upload URL');
-      }
-
-      const { presignedUrl, publicUrl, storagePath } = await presignRes.json();
-
-      setUploadProgress(30);
-
-      // Step 2: Upload directly to S3 (bypasses Supabase 50 MB limit entirely)
-      const s3Res = await fetch(presignedUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': file.type },
-        body: file,
-      });
-
-      if (!s3Res.ok) {
-        throw new Error(`S3 upload failed: ${s3Res.status} ${s3Res.statusText}`);
-      }
-
-      setUploadProgress(70);
-
-      // Step 3: Save book record to Supabase with the S3 public URL
-      const { data: bookData, error: bookError } = await supabase
-        .from('books')
-        .insert({
-          class_id: classId,
-          title: title.trim(),
-          pdf_url: publicUrl,
-          storage_path: storagePath,
-          file_size: file.size,
-          processing_status: 'pending',
-        })
-        .select()
-        .single();
-
-      if (bookError) throw bookError;
-
-      setUploadProgress(85);
-
-      // Step 4: Trigger Lambda to process the PDF
-      // Lambda will update books.processing_status and books.error_message directly
-      const processRes = await fetch('/api/process-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          book_id: bookData.id,
-          storage_path: storagePath,
-        }),
-      });
-
-      if (!processRes.ok) {
-        // Non-fatal: log but don't fail the upload
-        console.warn('PDF processing trigger failed:', await processRes.json());
+      for (const [index, file] of files.entries()) {
+        await uploadSingleFile(file, index, files.length);
       }
 
       setUploadProgress(100);
@@ -139,23 +145,23 @@ export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploa
         onSuccess();
         handleClose();
       }, 500);
-
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to upload PDF';
+      const message = err instanceof Error ? err.message : 'Failed to upload PDF files';
       console.error('Upload error:', err);
       setError(message);
       setUploadProgress(0);
     } finally {
       setUploading(false);
+      setCurrentFileLabel('');
     }
   };
 
   const handleClose = () => {
     if (!uploading) {
-      setTitle('');
-      setFile(null);
+      setFiles([]);
       setError('');
       setUploadProgress(0);
+      setCurrentFileLabel('');
       onClose();
     }
   };
@@ -179,39 +185,28 @@ export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploa
 
         {/* Body */}
         <div className="px-6 py-4 space-y-4">
-          {/* Title */}
-          <div>
-            <label htmlFor="pdf-title" className="block text-sm font-medium text-gray-700 mb-1">
-              Book Title
-            </label>
-            <input
-              type="text"
-              id="pdf-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Introduction to Python"
-              disabled={uploading}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 disabled:bg-gray-100"
-            />
-          </div>
-
           {/* File picker */}
           <div>
             <label htmlFor="pdf-file" className="block text-sm font-medium text-gray-700 mb-1">
-              PDF File (up to 500 MB)
+              PDF Files (up to 500 MB each)
             </label>
             <input
               type="file"
               id="pdf-file"
               accept="application/pdf"
+              multiple
               onChange={handleFileChange}
               disabled={uploading}
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 disabled:bg-gray-100"
             />
-            {file && (
-              <p className="text-sm text-gray-500 mt-1">
-                {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
-              </p>
+            {files.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {files.map((file) => (
+                  <p key={`${file.name}-${file.size}`} className="text-sm text-gray-500">
+                    {file.name} ({formatSize(file.size)})
+                  </p>
+                ))}
+              </div>
             )}
           </div>
 
@@ -219,7 +214,7 @@ export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploa
           {uploading && (
             <div>
               <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
-                <span>Uploading to S3...</span>
+                <span>{currentFileLabel ? `Uploading ${currentFileLabel}...` : 'Uploading PDFs...'}</span>
                 <span>{uploadProgress}%</span>
               </div>
               <div className="w-full bg-gray-200 rounded-full h-2">
@@ -257,10 +252,10 @@ export function PdfUploadModal({ classId, isOpen, onClose, onSuccess }: PdfUploa
           </button>
           <button
             onClick={handleUpload}
-            disabled={uploading || !file || !title.trim()}
+            disabled={uploading || files.length === 0}
             className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {uploading ? 'Uploading...' : 'Upload'}
+            {uploading ? 'Uploading...' : files.length > 1 ? `Upload ${files.length} PDFs` : 'Upload PDF'}
           </button>
         </div>
       </div>
