@@ -1295,23 +1295,50 @@ export default function ClassPage() {
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      {editingBookId === book.id ? (
-                        <div className="flex items-center gap-2">
-                          <input
-                            value={bookTitleDraft}
-                            onChange={(e) => setBookTitleDraft(e.target.value)}
-                            className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                          />
-                          <button
-                            onClick={handleRenameBook}
-                            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
-                          >
-                            Save
-                          </button>
-                        </div>
-                      ) : (
-                        <h5 className="truncate text-base font-semibold text-gray-900">{book.title}</h5>
-                      )}
+                    {editingBookId === book.id ? (
+                      <input
+                        value={bookTitleDraft}
+                        onChange={(e) => setBookTitleDraft(e.target.value)}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            void handleRenameBook();
+                          }
+                          if (event.key === 'Escape') {
+                            setEditingBookId(null);
+                            setBookTitleDraft('');
+                          }
+                        }}
+                        onBlur={() => {
+                          if (!bookTitleDraft.trim()) {
+                            setEditingBookId(null);
+                            setBookTitleDraft('');
+                            return;
+                          }
+                          void handleRenameBook();
+                        }}
+                        autoFocus
+                        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!canEditClass) return;
+                          setEditingBookId(book.id);
+                          setBookTitleDraft(book.title);
+                        }}
+                        className={`group inline-flex items-center gap-2 truncate text-left text-base font-semibold text-gray-900 ${canEditClass ? 'hover:text-gray-900' : ''}`}
+                      >
+                        <span className="truncate">{book.title}</span>
+                        {canEditClass && (
+                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 opacity-0 transition-opacity group-hover:opacity-100">
+                            Click to edit
+                          </span>
+                        )}
+                      </button>
+                    )}
                       <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
                         <ProcessingStatusBadge
                           bookId={book.id}
@@ -1338,22 +1365,13 @@ export default function ClassPage() {
                   >
                     Open
                   </Link>
-                  {canEditClass && (
-                    <>
-                      <button
-                        onClick={() => {
-                          setEditingBookId(book.id);
-                          setBookTitleDraft(book.title);
-                        }}
-                        className="rounded-md bg-gray-200 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-300"
-                      >
-                        Rename
-                      </button>
-                      <button
-                        onClick={() => void handleDeleteBook(book)}
-                        disabled={deletingBookId === book.id}
-                        className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
+                {canEditClass && (
+                  <>
+                    <button
+                      onClick={() => void handleDeleteBook(book)}
+                      disabled={deletingBookId === book.id}
+                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
                         {deletingBookId === book.id ? 'Deleting...' : 'Delete'}
                       </button>
                     </>
