@@ -109,7 +109,10 @@ export function PdfUploadModal({ classId, sectionId = null, startingPosition, is
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         book_id: bookData.id,
+        class_id: classId,
+        title: bookData.title,
         storage_path: storagePath,
+        file_name: file.name,
       }),
     });
 

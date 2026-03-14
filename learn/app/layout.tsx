@@ -10,8 +10,11 @@ export default function RootLayout({
     <html lang="en">
       <head>
         <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-        <title>Learn - Learning Aid Platform</title>
-        <meta name="description" content="Learning application with study materials management" />
+        <title>Smart Learn</title>
+        <meta
+          name="description"
+          content="Smart Learn is an AI-native learning management system that helps students organize classes, notes, books, and recordings."
+        />
       </head>
       <body>
         <AuthProvider>

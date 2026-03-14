@@ -40,7 +40,7 @@ export default function SignInPage() {
       <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Welcome Back</h1>
-          <p className="text-gray-600 mt-2">Sign in to your Learning Aid account</p>
+          <p className="text-gray-600 mt-2">Sign in to your Smart Learn account</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -91,7 +91,7 @@ export default function SignInPage() {
 
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-600">
-            Don't have an account?{' '}
+            Don&apos;t have an account?{' '}
             <Link href="/signup" className="text-blue-600 hover:text-blue-700 font-medium">
               Sign Up
             </Link>

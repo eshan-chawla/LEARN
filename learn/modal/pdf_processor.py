@@ -1,234 +1,258 @@
 """
-Modal function for PDF processing with LlamaParse and embeddings.
+Modal function for PDF processing into a shared Qdrant collection.
 Deploy with: modal deploy pdf_processor.py
 """
 
-import modal
-import os
-from typing import List, Dict
+from __future__ import annotations
 
-# Create Modal app
+import os
+import uuid
+from pathlib import Path
+from typing import Any, Dict, List
+
+import modal
+
+
 app = modal.App("pdf-processor")
 
-# Define the image with dependencies
 image = (
     modal.Image.debian_slim()
     .pip_install(
-        "llama-parse==0.4.0",
-        "sentence-transformers==2.7.0",
+        "boto3==1.34.131",
+        "pypdf==4.2.0",
         "qdrant-client==1.7.0",
+        "sentence-transformers==2.7.0",
         "supabase==2.3.0",
-        "requests"
     )
 )
 
-# Environment secrets (set in Modal dashboard)
+SHARED_COLLECTION_NAME = "class_content_embeddings"
+
+
 @app.function(
     image=image,
     secrets=[
-        modal.Secret.from_name("llama-cloud-api-key"),
+        modal.Secret.from_name("aws-s3-credentials"),
         modal.Secret.from_name("supabase-credentials"),
-        modal.Secret.from_name("qdrant-credentials")
+        modal.Secret.from_name("qdrant-credentials"),
+        modal.Secret.from_name("modal-webhook-secret"),
     ],
-    timeout=900,  # 15 minutes max
-    memory=2048,  # 2GB RAM
+    timeout=900,
+    memory=2048,
 )
-def process_pdf(book_id: str, job_id: str, storage_path: str) -> Dict:
+def process_pdf(
+    book_id: str,
+    class_id: str,
+    title: str,
+    storage_path: str,
+    file_name: str,
+) -> Dict[str, Any]:
     """
-    Process a PDF: extract text with LlamaParse, generate embeddings, store in Qdrant.
-
-    Args:
-        book_id: UUID of the book
-        job_id: UUID of the processing job
-        storage_path: Path to PDF in Supabase Storage (e.g., "user-id/file.pdf")
-
-    Returns:
-        Dict with success status and metadata
+    Process a PDF from S3, chunk per page, embed, and store in Qdrant.
     """
-    from llama_parse import LlamaParse
-    from sentence_transformers import SentenceTransformer
+    import boto3
+    from pypdf import PdfReader
     from qdrant_client import QdrantClient
-    from qdrant_client.models import Distance, VectorParams, PointStruct
+    from qdrant_client.models import (
+        Distance,
+        FieldCondition,
+        Filter,
+        MatchValue,
+        PointStruct,
+        VectorParams,
+    )
+    from sentence_transformers import SentenceTransformer
     from supabase import create_client
-    import uuid
 
-    # Initialize clients
     supabase = create_client(
         os.environ["SUPABASE_URL"],
-        os.environ["SUPABASE_SERVICE_KEY"]
+        os.environ["SUPABASE_SERVICE_KEY"],
     )
-
     qdrant = QdrantClient(
         url=os.environ["QDRANT_URL"],
-        api_key=os.environ["QDRANT_API_KEY"]
+        api_key=os.environ.get("QDRANT_API_KEY") or None,
     )
+    s3 = boto3.client(
+        "s3",
+        region_name=os.environ.get("AWS_REGION", "us-east-1"),
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+    )
+    bucket_name = os.environ["AWS_S3_RECORDINGS_BUCKET"]
+
+    temp_path = Path(f"/tmp/{book_id}.pdf")
 
     try:
-        # Update job status to processing
-        supabase.table("pdf_processing_jobs").update({
-            "status": "processing",
-            "progress": 0,
-            "started_at": "now()"
-        }).eq("id", job_id).execute()
+        supabase.table("books").update(
+            {
+                "processing_status": "processing",
+                "error_message": None,
+            }
+        ).eq("id", book_id).execute()
 
-        # Step 1: Download PDF from Supabase Storage (10%)
-        response = supabase.storage.from_("books").download(storage_path)
-        pdf_bytes = response
+        s3.download_file(bucket_name, storage_path, str(temp_path))
 
-        supabase.table("pdf_processing_jobs").update({
-            "progress": 10
-        }).eq("id", job_id).execute()
+        page_chunks = extract_page_chunks(temp_path)
+        if not page_chunks:
+            raise ValueError("No extractable text found in PDF")
 
-        # Step 2: Extract text with LlamaParse (30%)
-        parser = LlamaParse(
-            api_key=os.environ["LLAMA_CLOUD_API_KEY"],
-            result_type="markdown",  # Get structured markdown
-            verbose=True
-        )
+        model = SentenceTransformer("all-MiniLM-L6-v2")
+        points: List[PointStruct] = []
 
-        # Save PDF temporarily
-        temp_path = f"/tmp/{job_id}.pdf"
-        with open(temp_path, "wb") as f:
-            f.write(pdf_bytes)
+        for global_index, chunk in enumerate(page_chunks):
+            embedding = model.encode(chunk["text"], convert_to_numpy=True).tolist()
+            points.append(
+                PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=embedding,
+                    payload={
+                        "class_id": class_id,
+                        "content_type": "pdf",
+                        "source_id": book_id,
+                        "title": title,
+                        "file_name": file_name,
+                        "storage_path": storage_path,
+                        "page_number": chunk["page_number"],
+                        "page_chunk_index": chunk["page_chunk_index"],
+                        "chunk_index": global_index,
+                        "text": chunk["text"],
+                    },
+                )
+            )
 
-        # Parse PDF
-        documents = parser.load_data(temp_path)
-        full_text = "\n\n".join([doc.text for doc in documents])
-
-        supabase.table("pdf_processing_jobs").update({
-            "progress": 30
-        }).eq("id", job_id).execute()
-
-        # Step 3: Split into chunks (40%)
-        chunks = split_into_chunks(full_text, chunk_size=500, overlap=50)
-        total_chunks = len(chunks)
-
-        supabase.table("pdf_processing_jobs").update({
-            "progress": 40,
-            "total_chunks": total_chunks
-        }).eq("id", job_id).execute()
-
-        # Step 4: Generate embeddings (40-80%)
-        model = SentenceTransformer('all-MiniLM-L6-v2')
-
-        points = []
-        for i, chunk in enumerate(chunks):
-            embedding = model.encode(chunk, convert_to_numpy=True).tolist()
-
-            points.append(PointStruct(
-                id=str(uuid.uuid4()),
-                vector=embedding,
-                payload={
-                    "text": chunk,
-                    "book_id": book_id,
-                    "chunk_index": i,
-                    "total_chunks": total_chunks
-                }
-            ))
-
-            # Update progress every 10 chunks
-            if (i + 1) % 10 == 0 or i == total_chunks - 1:
-                progress = 40 + int((i + 1) / total_chunks * 40)
-                supabase.table("pdf_processing_jobs").update({
-                    "progress": progress,
-                    "chunks_processed": i + 1
-                }).eq("id", job_id).execute()
-
-        # Step 5: Store in Qdrant (80-95%)
-        collection_name = "pdf_embeddings"
-
-        # Create collection if doesn't exist
         try:
             qdrant.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+                collection_name=SHARED_COLLECTION_NAME,
+                vectors_config=VectorParams(size=384, distance=Distance.COSINE),
             )
         except Exception:
-            pass  # Collection exists
+            pass
 
-        # Batch upload (more efficient)
-        qdrant.upsert(
-            collection_name=collection_name,
-            points=points
+        qdrant.delete(
+            collection_name=SHARED_COLLECTION_NAME,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(key="class_id", match=MatchValue(value=class_id)),
+                    FieldCondition(key="content_type", match=MatchValue(value="pdf")),
+                    FieldCondition(key="source_id", match=MatchValue(value=book_id)),
+                ]
+            ),
+            wait=True,
         )
 
-        supabase.table("pdf_processing_jobs").update({
-            "progress": 95
-        }).eq("id", job_id).execute()
+        qdrant.upsert(
+            collection_name=SHARED_COLLECTION_NAME,
+            points=points,
+            wait=True,
+        )
 
-        # Step 6: Mark as completed (100%)
-        supabase.table("pdf_processing_jobs").update({
-            "status": "completed",
-            "progress": 100,
-            "completed_at": "now()"
-        }).eq("id", job_id).execute()
-
-        supabase.table("books").update({
-            "processing_status": "completed"
-        }).eq("id", book_id).execute()
-
-        # Cleanup
-        os.remove(temp_path)
+        supabase.table("books").update(
+            {
+                "processing_status": "completed",
+                "error_message": None,
+            }
+        ).eq("id", book_id).execute()
 
         return {
             "success": True,
-            "chunks_processed": total_chunks,
-            "book_id": book_id
+            "collection_name": SHARED_COLLECTION_NAME,
+            "content_type": "pdf",
+            "book_id": book_id,
+            "class_id": class_id,
+            "chunks_processed": len(points),
         }
-
-    except Exception as e:
-        # Mark as failed
-        error_msg = str(e)
-        supabase.table("pdf_processing_jobs").update({
-            "status": "failed",
-            "error_message": error_msg
-        }).eq("id", job_id).execute()
-
-        supabase.table("books").update({
-            "processing_status": "failed"
-        }).eq("id", book_id).execute()
-
+    except Exception as exc:
+        error_message = str(exc)
+        supabase.table("books").update(
+            {
+                "processing_status": "failed",
+                "error_message": error_message,
+            }
+        ).eq("id", book_id).execute()
         return {
             "success": False,
-            "error": error_msg
+            "error": error_message,
+            "book_id": book_id,
+            "class_id": class_id,
         }
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
-def split_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
-    """Split text into overlapping chunks by words."""
-    words = text.split()
-    chunks = []
+def extract_page_chunks(pdf_path: Path, chunk_size: int = 500, overlap: int = 50) -> List[Dict[str, Any]]:
+    from pypdf import PdfReader
 
-    i = 0
-    while i < len(words):
-        chunk_words = words[i:i + chunk_size]
-        chunks.append(" ".join(chunk_words))
+    reader = PdfReader(str(pdf_path))
+    chunks: List[Dict[str, Any]] = []
 
-        if len(chunk_words) < chunk_size:
-            break  # Last chunk
+    for page_index, page in enumerate(reader.pages):
+        page_text = (page.extract_text() or "").strip()
+        if not page_text:
+            continue
 
-        i += chunk_size - overlap
+        for page_chunk_index, chunk_text in enumerate(split_into_chunks(page_text, chunk_size=chunk_size, overlap=overlap)):
+            chunks.append(
+                {
+                    "page_number": page_index + 1,
+                    "page_chunk_index": page_chunk_index,
+                    "text": chunk_text,
+                }
+            )
 
     return chunks
 
 
-# Expose as web endpoint
-@app.function(image=image)
-@modal.web_endpoint(method="POST")
-def process_pdf_webhook(data: Dict):
-    """
-    Web endpoint that Next.js will call.
-    Spawns the processing function asynchronously.
-    """
-    book_id = data["book_id"]
-    job_id = data["job_id"]
-    storage_path = data["storage_path"]
+def split_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+    words = text.split()
+    chunks: List[str] = []
+    index = 0
 
-    # Spawn async processing
-    process_pdf.spawn(book_id, job_id, storage_path)
+    while index < len(words):
+        chunk_words = words[index : index + chunk_size]
+        if not chunk_words:
+            break
+
+        chunks.append(" ".join(chunk_words))
+
+        if len(chunk_words) < chunk_size:
+            break
+
+        index += chunk_size - overlap
+
+    return chunks
+
+
+@app.function(image=image, secrets=[modal.Secret.from_name("modal-webhook-secret")])
+@modal.web_endpoint(method="POST")
+def process_pdf_webhook(data: Dict[str, Any]) -> Dict[str, Any]:
+    webhook_secret = os.environ["MODAL_WEBHOOK_SECRET"]
+    request_secret = str(data.get("webhook_secret", ""))
+
+    if not request_secret or request_secret != webhook_secret:
+        return {
+            "success": False,
+            "error": "Unauthorized webhook request",
+        }
+
+    required_fields = ["book_id", "class_id", "title", "storage_path", "file_name"]
+    missing_fields = [field for field in required_fields if not data.get(field)]
+    if missing_fields:
+        return {
+            "success": False,
+            "error": f"Missing required fields: {', '.join(missing_fields)}",
+        }
+
+    process_pdf.spawn(
+        data["book_id"],
+        data["class_id"],
+        data["title"],
+        data["storage_path"],
+        data["file_name"],
+    )
 
     return {
         "success": True,
         "message": "Processing started",
-        "job_id": job_id
+        "book_id": data["book_id"],
     }

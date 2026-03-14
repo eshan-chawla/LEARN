@@ -61,7 +61,7 @@ export default function SignUpPage() {
           </div>
           <h2 className="text-2xl font-bold text-gray-900 mb-4">Check Your Email</h2>
           <p className="text-gray-600 mb-6">
-            We've sent a confirmation link to <strong>{email}</strong>.
+            We&apos;ve sent a confirmation link to <strong>{email}</strong>.
             Please check your email and click the link to verify your account.
           </p>
           <Link
@@ -76,11 +76,14 @@ export default function SignUpPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.16),_transparent_32%),linear-gradient(180deg,_#f8fbff_0%,_#eef4ff_44%,_#f8fafc_100%)] flex items-center justify-center px-4 py-12">
+      <div className="max-w-md w-full rounded-[28px] border border-white/70 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur p-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Create Account</h1>
-          <p className="text-gray-600 mt-2">Join Learning Aid to organize your studies</p>
+          <div className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-sky-700">
+            Smart Learn
+          </div>
+          <h1 className="mt-4 text-3xl font-bold text-slate-900">Create your workspace</h1>
+          <p className="text-slate-600 mt-2">Join Smart Learn to study with AI-ready class materials, notes, and recordings.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -93,7 +96,7 @@ export default function SignUpPage() {
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
               placeholder="John Doe"
             />
           </div>
@@ -107,7 +110,7 @@ export default function SignUpPage() {
               id="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
               required
               placeholder="you@example.com"
             />
@@ -122,7 +125,7 @@ export default function SignUpPage() {
               id="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
               required
               placeholder="At least 6 characters"
             />
@@ -137,7 +140,7 @@ export default function SignUpPage() {
               id="confirmPassword"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
               required
               placeholder="Re-enter your password"
             />
@@ -152,7 +155,7 @@ export default function SignUpPage() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full rounded-xl bg-slate-950 px-4 py-3 text-white transition-colors hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? 'Creating account...' : 'Create Account'}
           </button>
@@ -161,7 +164,7 @@ export default function SignUpPage() {
         <div className="mt-6 text-center">
           <p className="text-sm text-gray-600">
             Already have an account?{' '}
-            <Link href="/signin" className="text-blue-600 hover:text-blue-700 font-medium">
+            <Link href="/signin" className="font-medium text-sky-700 hover:text-sky-800">
               Sign In
             </Link>
           </p>

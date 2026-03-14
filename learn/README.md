@@ -1,12 +1,12 @@
 # Learn - Student Learning Aid Platform
 
-A Next.js application that helps students organize their classes, upload PDFs with AI-powered processing, record lectures, and take notes with autosave functionality.
+A Next.js application that helps students organize their classes, upload PDFs with AI-powered processing, record lectures, and take private markdown notes.
 
 ## Features
 
 - **Class Management**: Create and organize multiple classes with slug-based URLs
-- **PDF Upload & Processing**: Upload PDFs that are automatically processed using LlamaParse for text extraction and embeddings generation
-- **Notes with Autosave**: Take notes for each class with automatic saving
+- **PDF Upload & Processing**: Upload PDFs that are processed into page-aware embeddings with rich metadata for retrieval
+- **Private Markdown Notes**: Take personal markdown notes for each class
 - **Video Recordings**: Upload and manage lecture recordings
 - **Secure Authentication**: Email/password authentication with Supabase
 - **Row-Level Security**: All data is isolated per user
@@ -14,8 +14,9 @@ A Next.js application that helps students organize their classes, upload PDFs wi
 ## Tech Stack
 
 - **Frontend**: Next.js 16.1.6 (App Router), React 19, TypeScript, Tailwind CSS
-- **Backend**: Supabase (PostgreSQL + Auth + Storage)
-- **PDF Processing**: Modal serverless functions with LlamaParse
+- **Backend**: Supabase (PostgreSQL + Auth)
+- **Asset Storage**: AWS S3
+- **PDF Processing**: Modal serverless functions
 - **Embeddings**: Sentence Transformers (all-MiniLM-L6-v2)
 - **Vector Storage**: Qdrant
 
@@ -44,7 +45,6 @@ Follow the complete guide in `supabase/README.md`:
 2. Run the SQL scripts in order:
    - `00_DELETE_EVERYTHING.sql` (if resetting)
    - `01_SETUP_EVERYTHING.sql` (database tables)
-   - `02_SETUP_STORAGE.sql` (storage bucket)
 
 ### 3. Environment Variables
 
@@ -63,6 +63,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 
 # Modal Configuration (for PDF processing)
 MODAL_WEBHOOK_URL=your-modal-webhook-url
+MODAL_WEBHOOK_SECRET=your-modal-webhook-secret
 ```
 
 ### 4. Deploy PDF Processing to Modal
@@ -77,9 +78,10 @@ pip install modal
 modal token new
 
 # Create secrets (see DEPLOYMENT.md for details)
-modal secret create llama-cloud-api-key LLAMA_CLOUD_API_KEY=...
+modal secret create aws-s3-credentials AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=... AWS_S3_RECORDINGS_BUCKET=...
 modal secret create supabase-credentials SUPABASE_URL=... SUPABASE_SERVICE_KEY=...
 modal secret create qdrant-credentials QDRANT_URL=... QDRANT_API_KEY=...
+modal secret create modal-webhook-secret MODAL_WEBHOOK_SECRET=...
 
 # Deploy
 modal deploy modal/pdf_processor.py
@@ -108,7 +110,6 @@ learn/
 ├── supabase/                 # Database setup
 │   ├── 00_DELETE_EVERYTHING.sql
 │   ├── 01_SETUP_EVERYTHING.sql
-│   ├── 02_SETUP_STORAGE.sql
 │   └── README.md
 ├── modal/                    # Modal serverless functions
 │   ├── pdf_processor.py      # PDF processing function
@@ -123,16 +124,15 @@ learn/
 ### PDF Processing Flow
 
 1. User uploads PDF via dashboard
-2. File is stored in Supabase Storage (`books/{user_id}/{filename}.pdf`)
-3. Next.js API calls Modal webhook with book_id, job_id, and storage_path
+2. File is stored in S3 (`books/{class_id}/{filename}.pdf`)
+3. Next.js API calls the Modal webhook with book metadata and a shared webhook secret
 4. Modal function:
-   - Downloads PDF from Supabase Storage
-   - Extracts text using LlamaParse (better quality than PyPDF2)
-   - Splits text into chunks (500 words with 50 word overlap)
+   - Downloads the PDF from S3
+   - Extracts text page-by-page
+   - Splits each page into chunks (500 words with 50 word overlap)
    - Generates embeddings using Sentence Transformers
-   - Stores vectors in Qdrant with metadata
-   - Updates job status in Supabase (0% → 100%)
-5. Client polls for progress updates every 3 seconds
+   - Stores vectors in a shared Qdrant collection with `class_id`, `content_type`, `file_name`, and `page_number`
+   - Updates `books.processing_status` in Supabase
 
 ### Authentication
 
@@ -144,8 +144,8 @@ learn/
 
 - Row Level Security (RLS) enabled on all tables
 - Users can only access their own data
-- Storage files organized by user ID
-- Service role key used for Modal to bypass RLS for processing
+- Storage files organized by class ID
+- Service role key used by Modal to update processing status
 
 ## Development
 
@@ -182,5 +182,4 @@ Already deployed via `modal deploy` (see setup steps above).
 - [Next.js Documentation](https://nextjs.org/docs)
 - [Supabase Documentation](https://supabase.com/docs)
 - [Modal Documentation](https://modal.com/docs)
-- [LlamaParse Documentation](https://docs.llamaindex.ai/en/stable/llama_cloud/llama_parse/)
 - [Qdrant Documentation](https://qdrant.tech/documentation/)

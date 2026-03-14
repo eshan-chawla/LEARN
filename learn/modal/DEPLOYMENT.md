@@ -1,70 +1,55 @@
 # Modal PDF Processing - Deployment Guide
 
-This guide covers deploying the PDF processing function to Modal for serverless execution.
+This service processes PDFs from S3, chunks them page-by-page, embeds them, and stores them in a shared Qdrant collection.
+
+## Architecture
+
+```text
+Browser -> Vercel upload route -> S3
+Vercel -> books row in Supabase
+Vercel /api/process-pdf -> Modal webhook
+Modal -> S3 download -> chunk/embed -> Qdrant
+Modal -> books.processing_status update in Supabase
+```
+
+Qdrant collection:
+- `class_content_embeddings`
+
+Important payload filters:
+- `class_id`
+- `content_type`
+
+Current content type:
+- `pdf`
 
 ## Prerequisites
 
-- Python 3.11 or higher
-- Modal account (sign up at https://modal.com)
-- Supabase project with Storage enabled
-- Qdrant instance (cloud or local)
-- LlamaCloud API key
+- Python 3.11+
+- Modal account
+- AWS S3 bucket already used by the app
+- Supabase project
+- Qdrant instance
 
-## 1. Install Modal
+## 1. Install and authenticate Modal
 
 ```bash
 pip install modal
-```
-
-## 2. Authenticate with Modal
-
-```bash
 modal token new
 ```
 
-This will open a browser window to authenticate your Modal account.
+## 2. Create Modal secrets
 
-## 3. Set Up API Keys
-
-### 3.1 Get LlamaCloud API Key
-
-1. Sign up at https://cloud.llamaindex.ai
-2. Navigate to API Keys section
-3. Create a new API key
-4. Save the key securely
-
-### 3.2 Set Up Qdrant
-
-**Option A: Qdrant Cloud (Recommended)**
-1. Sign up at https://cloud.qdrant.io
-2. Create a new cluster
-3. Get your cluster URL and API key from the dashboard
-
-**Option B: Self-hosted Qdrant**
-```bash
-docker run -p 6333:6333 qdrant/qdrant
-```
-For self-hosted, URL will be `http://localhost:6333` and no API key is needed.
-
-### 3.3 Get Supabase Credentials
-
-From your Supabase project dashboard:
-1. Go to Project Settings > API
-2. Copy the URL (SUPABASE_URL)
-3. Copy the `service_role` key (SUPABASE_SERVICE_KEY) - NOT the anon key
-
-## 4. Create Modal Secrets
-
-Modal uses secrets to securely pass environment variables to your functions.
-
-### Create LlamaCloud secret
+### AWS secret
 
 ```bash
-modal secret create llama-cloud-api-key \
-  LLAMA_CLOUD_API_KEY=your-llama-cloud-api-key
+modal secret create aws-s3-credentials \
+  AWS_ACCESS_KEY_ID=your-aws-access-key-id \
+  AWS_SECRET_ACCESS_KEY=your-aws-secret-access-key \
+  AWS_REGION=us-east-1 \
+  AWS_S3_RECORDINGS_BUCKET=your-bucket-name
 ```
 
-### Create Supabase secret
+### Supabase secret
 
 ```bash
 modal secret create supabase-credentials \
@@ -72,7 +57,7 @@ modal secret create supabase-credentials \
   SUPABASE_SERVICE_KEY=your-service-role-key
 ```
 
-### Create Qdrant secret
+### Qdrant secret
 
 ```bash
 modal secret create qdrant-credentials \
@@ -80,192 +65,102 @@ modal secret create qdrant-credentials \
   QDRANT_API_KEY=your-qdrant-api-key
 ```
 
-For self-hosted Qdrant without API key:
+For self-hosted Qdrant:
+
 ```bash
 modal secret create qdrant-credentials \
   QDRANT_URL=http://localhost:6333 \
   QDRANT_API_KEY=""
 ```
 
-## 5. Deploy to Modal
+### Webhook secret
 
-From the project root directory:
+Use one random shared secret between Vercel and Modal.
+
+```bash
+modal secret create modal-webhook-secret \
+  MODAL_WEBHOOK_SECRET=your-random-shared-secret
+```
+
+## 3. Deploy
 
 ```bash
 modal deploy modal/pdf_processor.py
 ```
 
-This will:
-- Build the container image with all dependencies
-- Deploy the function to Modal's infrastructure
-- Generate a webhook URL for the endpoint
+Copy the generated webhook URL.
 
-## 6. Configure Next.js
+## 4. Configure Vercel / Next.js
 
-After deployment, Modal will output a webhook URL like:
-```
-https://your-username--pdf-processor-process-pdf-webhook.modal.run
-```
-
-Add this to your `.env.local`:
+Set these env vars in Vercel and `.env.local`:
 
 ```bash
 MODAL_WEBHOOK_URL=https://your-username--pdf-processor-process-pdf-webhook.modal.run
+MODAL_WEBHOOK_SECRET=your-random-shared-secret
 ```
 
-## 7. Verify Deployment
+## 5. Request contract
 
-Check your Modal dashboard at https://modal.com/apps to see:
-- Deployed function status
-- Recent invocations
-- Logs and metrics
+Vercel sends this payload to Modal:
 
-## Testing the Complete Flow
-
-### 1. Upload a PDF
-
-```bash
-# Test upload via your Next.js app
-# or use the Supabase Storage UI
+```json
+{
+  "webhook_secret": "shared-secret",
+  "book_id": "uuid",
+  "class_id": "uuid",
+  "title": "Linear Algebra Notes",
+  "storage_path": "books/class-id/123_file.pdf",
+  "file_name": "Linear Algebra Notes.pdf"
+}
 ```
 
-### 2. Trigger Processing
+## 6. Qdrant payload schema
 
-The Next.js API route at `/api/process-pdf` will automatically call your Modal webhook when a PDF is uploaded.
+Each point currently stores:
 
-### 3. Monitor Progress
+- `class_id`
+- `content_type` = `pdf`
+- `source_id` = book id
+- `title`
+- `file_name`
+- `storage_path`
+- `page_number`
+- `page_chunk_index`
+- `chunk_index`
+- `text`
 
-Check the `pdf_processing_jobs` table in Supabase to see:
-- `status`: pending → processing → completed/failed
-- `progress`: 0 → 10 → 30 → 40 → 80 → 95 → 100
-- `chunks_processed`: Current chunk count
-- `total_chunks`: Total chunks to process
+This schema is designed so video transcript ingestion can later reuse the same collection with `content_type = video`.
 
-### 4. Query Embeddings
+## 7. Current status tracking
 
-Once completed, embeddings are stored in Qdrant under the `pdf_embeddings` collection with:
-- `book_id`: Links to your books table
-- `text`: The actual text chunk
-- `chunk_index`: Position in the document
-- `vector`: 384-dimensional embedding
+The worker updates `books.processing_status`:
 
-## Troubleshooting
+- `pending`
+- `processing`
+- `completed`
+- `failed`
 
-### Cold Start Times
+If processing fails, `books.error_message` is populated.
 
-First invocation may take 30-60 seconds to:
-- Pull the container image
-- Download ML models (sentence-transformers)
-- Initialize clients
+There is no `pdf_processing_jobs` table in the current Stage 1 setup.
 
-Subsequent calls are much faster (2-3 seconds).
+## 8. Verification
 
-### Memory Issues
-
-If processing large PDFs fails with OOM errors, increase memory in `pdf_processor.py`:
-
-```python
-@app.function(
-    memory=4096,  # Increase from 2048 to 4096 MB
-    ...
-)
-```
-
-### Timeout Issues
-
-For very large PDFs, increase timeout:
-
-```python
-@app.function(
-    timeout=1800,  # Increase from 900 to 1800 seconds (30 min)
-    ...
-)
-```
-
-### Debugging
-
-View real-time logs in Modal dashboard or via CLI:
+1. Upload a PDF in the app
+2. Confirm the book row is created with `processing_status = pending`
+3. Confirm `/api/process-pdf` returns success
+4. Check Modal logs:
 
 ```bash
 modal app logs pdf-processor
 ```
 
-## Cost Optimization
+5. Confirm the book row becomes `completed`
+6. Confirm Qdrant has points in `class_content_embeddings`
+7. Inspect payload metadata for `class_id`, `content_type`, `file_name`, and `page_number`
 
-Modal charges for:
-- CPU/GPU time during execution
-- Memory usage
-- Storage for container images
+## 9. Notes
 
-Tips to reduce costs:
-1. Use smaller embedding models if accuracy allows
-2. Adjust chunk size to reduce total chunks
-3. Enable keep-warm for production (reduces cold starts)
-4. Use spot instances for non-critical processing
-
-## Production Considerations
-
-### 1. Enable Keep-Warm
-
-For production, add keep-warm to reduce cold starts:
-
-```python
-@app.function(
-    image=image,
-    keep_warm=1,  # Keep 1 instance warm
-    ...
-)
-```
-
-### 2. Add Retry Logic
-
-Modal automatically retries failed functions, but you can customize:
-
-```python
-@app.function(
-    retries=3,  # Retry up to 3 times on failure
-    ...
-)
-```
-
-### 3. Monitor Performance
-
-Use Modal's built-in metrics:
-- Execution time per function
-- Success/failure rates
-- Memory usage patterns
-- Cold start frequency
-
-### 4. Rate Limiting
-
-LlamaCloud has rate limits. For high-volume processing:
-1. Implement queuing in your Next.js app
-2. Add exponential backoff in Modal function
-3. Consider LlamaCloud enterprise plan
-
-## Updating the Function
-
-To deploy changes:
-
-```bash
-modal deploy modal/pdf_processor.py
-```
-
-Modal will:
-- Build a new image with changes
-- Deploy with zero downtime
-- Keep the same webhook URL
-
-## Rollback
-
-If a deployment has issues, rollback via Modal dashboard:
-1. Go to your app's version history
-2. Select a previous version
-3. Click "Deploy"
-
-## Additional Resources
-
-- Modal docs: https://modal.com/docs
-- LlamaParse docs: https://docs.llamaindex.ai/en/stable/llama_cloud/llama_parse/
-- Qdrant docs: https://qdrant.tech/documentation/
-- Sentence Transformers: https://www.sbert.net/
+- The service currently chunks per page to preserve page metadata.
+- The collection is shared across classes; retrieval must always filter by `class_id`.
+- Later video transcript ingestion should use the same collection and set `content_type = video`.

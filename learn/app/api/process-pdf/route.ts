@@ -3,30 +3,37 @@ import { NextRequest, NextResponse } from 'next/server';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { book_id, storage_path } = body;
+    const { book_id, class_id, title, storage_path, file_name } = body;
 
-    if (!book_id || !storage_path) {
+    if (!book_id || !class_id || !title || !storage_path || !file_name) {
       return NextResponse.json(
-        { error: 'Missing required fields: book_id, storage_path' },
+        { error: 'Missing required fields: book_id, class_id, title, storage_path, file_name' },
         { status: 400 }
       );
     }
 
     const modalWebhookUrl = process.env.MODAL_WEBHOOK_URL;
+    const modalWebhookSecret = process.env.MODAL_WEBHOOK_SECRET;
 
-    if (!modalWebhookUrl) {
-      console.warn('MODAL_WEBHOOK_URL not configured — skipping processing trigger');
+    if (!modalWebhookUrl || !modalWebhookSecret) {
+      console.warn('Modal PDF processing is not fully configured');
       return NextResponse.json(
-        { error: 'PDF processing is not configured. Set MODAL_WEBHOOK_URL in environment variables.' },
+        { error: 'PDF processing is not configured. Set MODAL_WEBHOOK_URL and MODAL_WEBHOOK_SECRET in environment variables.' },
         { status: 500 }
       );
     }
 
-    // Invoke Modal/Lambda function via webhook
     const modalResponse = await fetch(modalWebhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ book_id, storage_path }),
+      body: JSON.stringify({
+        webhook_secret: modalWebhookSecret,
+        book_id,
+        class_id,
+        title,
+        storage_path,
+        file_name,
+      }),
     });
 
     if (!modalResponse.ok) {
@@ -35,12 +42,18 @@ export async function POST(request: NextRequest) {
       throw new Error('Failed to invoke Modal function');
     }
 
+    const modalPayload = await modalResponse.json().catch(() => null);
+    if (!modalPayload?.success) {
+      throw new Error(typeof modalPayload?.error === 'string' ? modalPayload.error : 'Modal rejected the request');
+    }
+
     return NextResponse.json({ success: true, message: 'PDF processing started' });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to start PDF processing';
     console.error('Error invoking PDF processor:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to start PDF processing' },
+      { error: message },
       { status: 500 }
     );
   }
@@ -79,10 +92,11 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(books[0]);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch status';
     console.error('Error fetching book status:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to fetch status' },
+      { error: message },
       { status: 500 }
     );
   }

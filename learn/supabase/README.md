@@ -36,7 +36,6 @@ Both asset types are uploaded directly from the browser to S3 via a pre-signed P
 - `books` — PDF metadata (PDF hosted on S3)
 - `notes` — Private markdown notes per user per class
 - `user_class` — User-to-class memberships with `owner` / `manager` / `student` roles
-- `pdf_processing_jobs` — Tracks async PDF processing for Lambda/embeddings
 
 ### Security
 - Row Level Security (RLS) enabled on all tables
@@ -45,7 +44,6 @@ Both asset types are uploaded directly from the browser to S3 via a pre-signed P
 - `user_class.role = 'owner'` can manage roles and transfer ownership
 - `user_class.role = 'manager'` can edit class content and add/remove students
 - `user_class.role = 'student'` is view-only access
-- Service role can update `pdf_processing_jobs` (required by Lambda)
 
 ---
 

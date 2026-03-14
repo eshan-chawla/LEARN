@@ -190,8 +190,8 @@ export default function DashboardPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Learning Aid</h1>
-              <p className="text-sm text-gray-600">Welcome, {displayName}</p>
+              <h1 className="text-2xl font-bold text-gray-900">Smart Learn</h1>
+              <p className="text-sm text-gray-600">Welcome back, {displayName}</p>
             </div>
             <button
               onClick={handleSignOut}
@@ -209,7 +209,7 @@ export default function DashboardPage() {
           <div className="flex justify-between items-center">
             <div>
               <h2 className="text-3xl font-bold text-gray-900">My Classes</h2>
-              <p className="text-gray-600 mt-1">Organize your learning materials in one place</p>
+              <p className="text-gray-600 mt-1">Manage the classes, notes, books, and recordings that power your learning flow.</p>
             </div>
             {canCreateClasses && (
               <button

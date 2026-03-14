@@ -182,6 +182,12 @@ function formatDuration(duration: number | null) {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
+function getFileNameFromStoragePath(storagePath: string | null, fallbackTitle: string) {
+  if (!storagePath) return `${fallbackTitle}.pdf`;
+  const segments = storagePath.split('/');
+  return segments[segments.length - 1] || `${fallbackTitle}.pdf`;
+}
+
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message;
 
@@ -246,6 +252,7 @@ export default function ClassPage() {
   const [videoUploadModalOpen, setVideoUploadModalOpen] = useState(false);
   const [members, setMembers] = useState<ClassMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [bookMenu, setBookMenu] = useState<{ bookId: string; top: number; left: number } | null>(null);
   const [memberEmail, setMemberEmail] = useState('');
   const [memberError, setMemberError] = useState<string | null>(null);
   const [addingMember, setAddingMember] = useState(false);
@@ -265,12 +272,14 @@ export default function ClassPage() {
   const [recordingTitleDraft, setRecordingTitleDraft] = useState('');
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [bookTitleDraft, setBookTitleDraft] = useState('');
+  const [processingBookId, setProcessingBookId] = useState<string | null>(null);
   const [deletingRecordingId, setDeletingRecordingId] = useState<string | null>(null);
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
   const [draggedBook, setDraggedBook] = useState<DraggedBook | null>(null);
   const [bookDropTarget, setBookDropTarget] = useState<BookDropTarget | null>(null);
   const accessTokenRef = useRef<string | null>(null);
   const draggedBookRef = useRef<DraggedBook | null>(null);
+  const bookMenuRef = useRef<HTMLDivElement | null>(null);
   const memberMenuRef = useRef<HTMLDivElement | null>(null);
   const noteContentRef = useRef('');
   const currentNoteContentRef = useRef('');
@@ -415,6 +424,47 @@ export default function ClassPage() {
   useEffect(() => {
     canUseNotesRef.current = canUseNotes;
   }, [canUseNotes]);
+
+  useEffect(() => {
+    if (!bookMenu) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target) return;
+
+      if (bookMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      if (target.closest(`[data-book-menu-trigger="${bookMenu.bookId}"]`)) {
+        return;
+      }
+
+      setBookMenu(null);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setBookMenu(null);
+      }
+    };
+
+    const closeMenu = () => {
+      setBookMenu(null);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [bookMenu]);
 
   useEffect(() => {
     if (!memberMenu) return;
@@ -885,6 +935,7 @@ export default function ClassPage() {
   const handleDeleteBook = async (book: Book) => {
     if (!canEditClass) return;
 
+    setBookMenu(null);
     const confirmed = window.confirm(`Delete "${book.title}"? This will remove the book file too.`);
     if (!confirmed) return;
 
@@ -918,6 +969,60 @@ export default function ClassPage() {
       alert(getErrorMessage(error, 'Failed to delete book'));
     } finally {
       setDeletingBookId(null);
+    }
+  };
+
+  const handleProcessBook = async (book: Book) => {
+    if (!canEditClass) return;
+    if (!book.storage_path) {
+      alert('This book does not have a storage path to process.');
+      return;
+    }
+
+    try {
+      setBookMenu(null);
+      setProcessingBookId(book.id);
+
+      const { error: updateError } = await supabase
+        .from('books')
+        .update({
+          processing_status: 'pending',
+          error_message: null,
+        })
+        .eq('id', book.id);
+
+      if (updateError) throw updateError;
+
+      setBooks((currentBooks) =>
+        currentBooks.map((currentBook) =>
+          currentBook.id === book.id
+            ? { ...currentBook, processing_status: 'pending' }
+            : currentBook
+        )
+      );
+
+      const response = await fetch('/api/process-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          book_id: book.id,
+          class_id: book.class_id,
+          title: book.title,
+          storage_path: book.storage_path,
+          file_name: getFileNameFromStoragePath(book.storage_path, book.title),
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(typeof payload?.error === 'string' ? payload.error : 'Failed to start PDF processing');
+      }
+    } catch (error) {
+      console.error('Error processing book:', error);
+      alert(getErrorMessage(error, 'Failed to start PDF processing'));
+      await loadBooks();
+    } finally {
+      setProcessingBookId(null);
     }
   };
 
@@ -1211,6 +1316,9 @@ export default function ClassPage() {
     books: books.filter((book) => book.section_id === section.id).sort(compareBooks),
   }));
   const unassignedBooks = books.filter((book) => book.section_id === null).sort(compareBooks);
+  const activeBookMenuBook = bookMenu
+    ? books.find((book) => book.id === bookMenu.bookId) ?? null
+    : null;
   const activeMemberMenuMember = memberMenu
     ? members.find((member) => member.user_id === memberMenu.memberId) ?? null
     : null;
@@ -1401,16 +1509,29 @@ export default function ClassPage() {
                   >
                     Open
                   </Link>
-                {canEditClass && (
-                  <>
+                  {canEditClass && (
                     <button
-                      onClick={() => void handleDeleteBook(book)}
-                      disabled={deletingBookId === book.id}
-                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={(event) => {
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const menuWidth = 192;
+                        const menuLeft = Math.min(window.innerWidth - menuWidth - 16, Math.max(16, rect.right - menuWidth));
+                        const menuTop = Math.min(window.innerHeight - 16, rect.bottom + 8);
+
+                        setBookMenu((current) => (
+                          current?.bookId === book.id
+                            ? null
+                            : { bookId: book.id, top: menuTop, left: menuLeft }
+                        ));
+                      }}
+                      data-book-menu-trigger={book.id}
+                      disabled={processingBookId === book.id || deletingBookId === book.id}
+                      className="rounded-md border border-gray-300 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      aria-label={`Open actions for ${book.title}`}
                     >
-                        {deletingBookId === book.id ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </>
+                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 6a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 5.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 5.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+                      </svg>
+                    </button>
                   )}
                 </div>
               </div>
@@ -2026,6 +2147,27 @@ export default function ClassPage() {
           onClose={() => setBookUploadTarget(null)}
           onSuccess={handleBookUploadSuccess}
         />
+      )}
+
+      {bookMenu && activeBookMenuBook && (
+        <div
+          ref={bookMenuRef}
+          className="fixed z-50 min-w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-xl"
+          style={{ top: bookMenu.top, left: bookMenu.left }}
+        >
+          <button
+            onClick={() => void handleProcessBook(activeBookMenuBook)}
+            className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+          >
+            {processingBookId === activeBookMenuBook.id ? 'Processing...' : 'Process PDF'}
+          </button>
+          <button
+            onClick={() => void handleDeleteBook(activeBookMenuBook)}
+            className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+          >
+            {deletingBookId === activeBookMenuBook.id ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
       )}
 
       {memberMenu && activeMemberMenuMember && (
