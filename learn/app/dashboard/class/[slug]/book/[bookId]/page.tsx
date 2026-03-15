@@ -117,9 +117,9 @@ export default function BookViewerPage() {
       }
 
       setLoading(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error loading book:', err);
-      setError(err.message || 'Failed to load book');
+      setError(err instanceof Error ? err.message : 'Failed to load book');
       setLoading(false);
     }
   };
@@ -128,7 +128,7 @@ export default function BookViewerPage() {
   const handleSignOut = async () => {
     try {
       await auth.signOut();
-      router.push('/signin');
+      router.push('/');
     } catch (error) {
       console.error('Sign out error:', error);
     }
@@ -168,7 +168,7 @@ export default function BookViewerPage() {
               Retry
             </button>
             <Link
-              href={`/dashboard/class/${slug}`}
+              href={`/dashboard/class/${slug}?tab=books`}
               className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-center"
             >
               Back to Class
@@ -192,7 +192,7 @@ export default function BookViewerPage() {
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <Link
-                href={`/dashboard/class/${slug}`}
+                href={`/dashboard/class/${slug}?tab=books`}
                 className="text-gray-600 hover:text-gray-900 transition-colors"
                 title="Back to class"
               >

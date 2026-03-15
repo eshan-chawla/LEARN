@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { AuthPageShell } from '@/components/AuthPageShell';
 
 export default function SignUpPage() {
   const [email, setEmail] = useState('');
@@ -52,40 +53,43 @@ export default function SignUpPage() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-md p-8 text-center">
+      <AuthPageShell
+        title="Check your email"
+        description={`We sent a confirmation link to ${email}. Open it to verify your Smart Learn account.`}
+      >
+        <div className="text-center">
           <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
             <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">Check Your Email</h2>
-          <p className="text-gray-600 mb-6">
-            We&apos;ve sent a confirmation link to <strong>{email}</strong>.
-            Please check your email and click the link to verify your account.
+          <p className="mx-auto mb-6 max-w-sm text-sm leading-7 text-slate-600">
+            After you confirm, sign in and start organizing your classes in one place.
           </p>
           <Link
             href="/signin"
-            className="inline-block px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            className="inline-block rounded-xl bg-slate-950 px-6 py-3 text-white transition-colors hover:bg-slate-800"
           >
             Go to Sign In
           </Link>
         </div>
-      </div>
+      </AuthPageShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.16),_transparent_32%),linear-gradient(180deg,_#f8fbff_0%,_#eef4ff_44%,_#f8fafc_100%)] flex items-center justify-center px-4 py-12">
-      <div className="max-w-md w-full rounded-[28px] border border-white/70 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.12)] backdrop-blur p-8">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-sky-700">
-            Smart Learn
-          </div>
-          <h1 className="mt-4 text-3xl font-bold text-slate-900">Create your workspace</h1>
-          <p className="text-slate-600 mt-2">Join Smart Learn to study with AI-ready class materials, notes, and recordings.</p>
-        </div>
-
+    <AuthPageShell
+      title="Create your workspace"
+      description="Join Smart Learn to study with AI-ready class materials, notes, and recordings."
+      footer={(
+        <p className="text-sm text-gray-600">
+          Already have an account?{' '}
+          <Link href="/signin" className="font-medium text-sky-700 hover:text-sky-800">
+            Sign In
+          </Link>
+        </p>
+      )}
+    >
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
             <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
@@ -160,16 +164,6 @@ export default function SignUpPage() {
             {loading ? 'Creating account...' : 'Create Account'}
           </button>
         </form>
-
-        <div className="mt-6 text-center">
-          <p className="text-sm text-gray-600">
-            Already have an account?{' '}
-            <Link href="/signin" className="font-medium text-sky-700 hover:text-sky-800">
-              Sign In
-            </Link>
-          </p>
-        </div>
-      </div>
-    </div>
+    </AuthPageShell>
   );
 }

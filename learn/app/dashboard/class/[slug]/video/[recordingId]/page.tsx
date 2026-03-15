@@ -173,7 +173,7 @@ export default function VideoViewerPage() {
   const handleSignOut = async () => {
     try {
       await auth.signOut();
-      router.push('/signin');
+      router.push('/');
     } catch (signOutError) {
       console.error('Sign out error:', signOutError);
     }

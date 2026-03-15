@@ -2,17 +2,17 @@ import Link from 'next/link';
 
 export default function HomePage() {
   return (
-    <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.22),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(249,115,22,0.18),_transparent_24%),linear-gradient(180deg,_#f8fafc_0%,_#eef6ff_52%,_#f8fafc_100%)] text-slate-900">
+    <main className="min-h-screen bg-stone-50 text-slate-900">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
-        <header className="flex items-center justify-between rounded-full border border-white/70 bg-white/75 px-5 py-3 shadow-[0_20px_50px_rgba(15,23,42,0.08)] backdrop-blur">
+        <header className="flex items-center justify-between border-b border-stone-200 pb-5">
           <div>
-            <div className="text-xs font-semibold uppercase tracking-[0.32em] text-sky-700">Smart Learn</div>
-            <div className="text-sm text-slate-500">AI-native learning management</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-700">Smart Learn</div>
+            <div className="mt-1 text-sm text-stone-600">AI-native learning management for students</div>
           </div>
           <nav className="flex items-center gap-3">
             <Link
               href="/signin"
-              className="rounded-full px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              className="rounded-full px-4 py-2 text-sm font-medium text-stone-700 transition hover:bg-stone-100"
             >
               Sign In
             </Link>
@@ -25,17 +25,15 @@ export default function HomePage() {
           </nav>
         </header>
 
-        <section className="relative grid gap-10 pb-16 pt-16 lg:grid-cols-[1.15fr_0.85fr] lg:items-center lg:pt-20">
-          <div>
-            <div className="inline-flex items-center rounded-full border border-sky-200 bg-white/80 px-3 py-1 text-xs font-semibold uppercase tracking-[0.28em] text-sky-700 shadow-sm">
-              Built for students first
-            </div>
-            <h1 className="mt-6 max-w-4xl text-5xl font-black leading-[0.95] tracking-tight text-slate-950 sm:text-6xl lg:text-7xl">
-              The AI-native LMS that makes studying feel organized instead of overwhelming.
+        <section className="grid gap-12 py-16 lg:grid-cols-[0.95fr_1.05fr] lg:items-start lg:py-20">
+          <div className="max-w-2xl">
+            <p className="text-sm font-semibold uppercase tracking-[0.28em] text-sky-700">Built for actual study workflows</p>
+            <h1 className="mt-5 text-5xl font-black leading-[0.95] tracking-tight text-slate-950 sm:text-6xl">
+              One class space for the lecture, the reading, your notes, and the answer you need later.
             </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-              Smart Learn brings class recordings, books, notes, and AI-ready knowledge retrieval into one clean workspace,
-              so students spend less time hunting for material and more time actually learning.
+            <p className="mt-6 max-w-xl text-lg leading-8 text-stone-700">
+              Smart Learn helps students keep course material in one place, then turns that material into clean context for
+              AI-powered retrieval. No more digging across folders, chats, and scattered links the night before an exam.
             </p>
 
             <div className="mt-8 flex flex-col gap-4 sm:flex-row">
@@ -47,105 +45,88 @@ export default function HomePage() {
               </Link>
               <Link
                 href="/signin"
-                className="rounded-2xl border border-slate-200 bg-white/90 px-7 py-3.5 text-center text-base font-semibold text-slate-700 transition hover:bg-slate-50"
+                className="rounded-2xl border border-stone-300 px-7 py-3.5 text-center text-base font-semibold text-stone-700 transition hover:bg-stone-100"
               >
-                Explore your dashboard
+                Sign in
               </Link>
             </div>
 
-            <div className="mt-10 grid gap-4 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/70 bg-white/75 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-                <div className="text-3xl font-black text-slate-950">1</div>
-                <p className="mt-2 text-sm text-slate-600">Unified place for notes, books, and class recordings.</p>
+            <dl className="mt-10 space-y-5 border-l border-stone-200 pl-5">
+              <div>
+                <dt className="text-sm font-semibold text-slate-900">After class</dt>
+                <dd className="mt-1 text-sm leading-7 text-stone-600">Drop in the recording and reading packet for one subject instead of losing them across tools.</dd>
               </div>
-              <div className="rounded-2xl border border-white/70 bg-white/75 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-                <div className="text-3xl font-black text-slate-950">AI</div>
-                <p className="mt-2 text-sm text-slate-600">Structured content ready for semantic search and study assistance.</p>
+              <div>
+                <dt className="text-sm font-semibold text-slate-900">While studying</dt>
+                <dd className="mt-1 text-sm leading-7 text-stone-600">Keep your own markdown notes beside the official class material, not in a separate app.</dd>
               </div>
-              <div className="rounded-2xl border border-white/70 bg-white/75 p-5 shadow-[0_18px_45px_rgba(15,23,42,0.06)]">
-                <div className="text-3xl font-black text-slate-950">Fast</div>
-                <p className="mt-2 text-sm text-slate-600">Designed to reduce context switching for students managing multiple classes.</p>
+              <div>
+                <dt className="text-sm font-semibold text-slate-900">Before the exam</dt>
+                <dd className="mt-1 text-sm leading-7 text-stone-600">Use AI retrieval against the exact class content instead of trusting vague summaries with no source context.</dd>
               </div>
-            </div>
+            </dl>
           </div>
 
-          <div className="relative">
-            <div className="absolute inset-0 translate-x-4 translate-y-6 rounded-[32px] bg-sky-200/40 blur-3xl" />
-            <div className="relative rounded-[32px] border border-white/80 bg-slate-950 p-6 text-white shadow-[0_30px_90px_rgba(15,23,42,0.28)]">
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+          <div className="rounded-[30px] border border-stone-200 bg-white shadow-[0_28px_80px_rgba(15,23,42,0.08)]">
+            <div className="border-b border-stone-200 px-6 py-5">
+              <div className="flex items-center justify-between gap-4">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-300">Student Workspace</p>
-                  <h2 className="mt-2 text-2xl font-bold">Everything for one class, finally in one place.</h2>
+                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">Smart Learn Workspace</p>
+                  <h2 className="mt-2 text-2xl font-bold text-slate-950">Biology 201</h2>
                 </div>
-                <div className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200">Live structure</div>
-              </div>
-
-              <div className="mt-6 space-y-4">
-                <div className="rounded-2xl bg-white/8 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">AI-ready books</p>
-                      <p className="mt-1 text-sm text-slate-300">Upload PDFs, organize by section, and keep titles clean in the UI.</p>
-                    </div>
-                    <div className="rounded-xl bg-amber-300/20 px-3 py-1 text-xs font-semibold text-amber-200">Books</div>
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-white/8 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Recorded classes</p>
-                      <p className="mt-1 text-sm text-slate-300">Store videos alongside the rest of the class context instead of scattered links.</p>
-                    </div>
-                    <div className="rounded-xl bg-sky-300/20 px-3 py-1 text-xs font-semibold text-sky-200">Recordings</div>
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-white/8 p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-white">Private markdown notes</p>
-                      <p className="mt-1 text-sm text-slate-300">Each student keeps personal notes inside the same class workspace.</p>
-                    </div>
-                    <div className="rounded-xl bg-emerald-300/20 px-3 py-1 text-xs font-semibold text-emerald-200">Notes</div>
-                  </div>
+                <div className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                  Ready for retrieval
                 </div>
               </div>
+              <div className="mt-4 flex flex-wrap gap-2 text-sm">
+                <span className="rounded-full bg-slate-950 px-3 py-1 text-white">Books</span>
+                <span className="rounded-full bg-stone-100 px-3 py-1 text-stone-700">Recordings</span>
+                <span className="rounded-full bg-stone-100 px-3 py-1 text-stone-700">Notes</span>
+              </div>
+            </div>
 
-              <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Why it works</p>
-                  <p className="mt-2 text-sm text-slate-200">Classes stay structured by design, so AI retrieval later has clean, scoped context.</p>
+            <div className="grid gap-6 px-6 py-6 lg:grid-cols-[0.9fr_1.1fr]">
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Reading packet</p>
+                  <h3 className="mt-2 text-base font-semibold text-slate-950">Photosynthesis Foundations.pdf</h3>
+                  <p className="mt-1 text-sm text-stone-600">Pages 12-18 assigned for the next lab discussion.</p>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-xs uppercase tracking-[0.24em] text-slate-400">For students</p>
-                  <p className="mt-2 text-sm text-slate-200">Less time searching across tools. More time reviewing what matters before class and exams.</p>
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-700">Lecture recording</p>
+                  <h3 className="mt-2 text-base font-semibold text-slate-950">Week 4: Light Reactions</h3>
+                  <p className="mt-1 text-sm text-stone-600">Professor explains the exam framing at 12:40 and again at 31:05.</p>
+                </div>
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">Your note</p>
+                  <p className="mt-2 text-sm leading-7 text-stone-700">
+                    Need to remember the difference between light-dependent reactions and the Calvin cycle.
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl bg-slate-950 p-5 text-white">
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-300">Ask Smart Learn</p>
+                <h3 className="mt-2 text-xl font-bold">What should I review before the quiz on photosynthesis?</h3>
+                <div className="mt-5 rounded-2xl bg-white/8 p-4">
+                  <p className="text-sm leading-7 text-slate-100">
+                    Focus on the two-stage flow. The reading packet explains the inputs and outputs on page 14, and the lecture
+                    clarifies how that maps to the quiz format around 12:40.
+                  </p>
+                </div>
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="rounded-xl border border-white/10 px-4 py-3">
+                    <p className="font-medium text-white">Source 1</p>
+                    <p className="mt-1 text-slate-300">Photosynthesis Foundations.pdf, page 14</p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 px-4 py-3">
+                    <p className="font-medium text-white">Source 2</p>
+                    <p className="mt-1 text-slate-300">Week 4: Light Reactions, timestamp 12:40</p>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </section>
-
-        <section className="grid gap-5 pb-20 md:grid-cols-3">
-          <article className="rounded-[28px] border border-slate-200/80 bg-white/85 p-7 shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
-            <p className="text-sm font-semibold uppercase tracking-[0.26em] text-sky-700">Capture</p>
-            <h3 className="mt-3 text-2xl font-bold text-slate-950">Bring every learning asset together</h3>
-            <p className="mt-3 text-sm leading-7 text-slate-600">
-              Import PDFs, upload recordings, and keep notes inside the exact class they belong to instead of across disconnected apps.
-            </p>
-          </article>
-          <article className="rounded-[28px] border border-slate-200/80 bg-white/85 p-7 shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
-            <p className="text-sm font-semibold uppercase tracking-[0.26em] text-orange-700">Organize</p>
-            <h3 className="mt-3 text-2xl font-bold text-slate-950">Keep coursework readable and structured</h3>
-            <p className="mt-3 text-sm leading-7 text-slate-600">
-              Sections, tables, and class-specific access control keep study material easy to scan for both teachers and students.
-            </p>
-          </article>
-          <article className="rounded-[28px] border border-slate-200/80 bg-white/85 p-7 shadow-[0_18px_50px_rgba(15,23,42,0.06)]">
-            <p className="text-sm font-semibold uppercase tracking-[0.26em] text-emerald-700">Retrieve</p>
-            <h3 className="mt-3 text-2xl font-bold text-slate-950">Prepare for AI-powered study flows</h3>
-            <p className="mt-3 text-sm leading-7 text-slate-600">
-              Smart Learn is built to make class content AI-ready, so search, summarization, and future learning copilots have better context.
-            </p>
-          </article>
         </section>
       </div>
     </main>

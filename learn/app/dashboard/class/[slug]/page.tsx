@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { useRouter, useParams } from 'next/navigation';
+import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatDate } from '@/lib/utils';
@@ -104,18 +104,18 @@ const memberRoleStyles: Record<ClassRole, { label: string; className: string }> 
   },
   manager: {
     label: 'Manager',
-    className: 'bg-blue-100 text-blue-700',
+    className: 'bg-sky-100 text-sky-700',
   },
   student: {
     label: 'Student',
-    className: 'bg-gray-100 text-gray-700',
+    className: 'bg-stone-100 text-stone-700',
   },
 };
 
 const recordingStatusStyles: Record<Recording['processing_status'], { label: string; className: string; icon: ReactNode }> = {
   pending: {
     label: 'Queued',
-    className: 'bg-gray-100 text-gray-700',
+    className: 'bg-stone-100 text-stone-700',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -124,7 +124,7 @@ const recordingStatusStyles: Record<Recording['processing_status'], { label: str
   },
   processing: {
     label: 'Processing',
-    className: 'bg-blue-100 text-blue-700',
+    className: 'bg-sky-100 text-sky-700',
     icon: (
       <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -134,7 +134,7 @@ const recordingStatusStyles: Record<Recording['processing_status'], { label: str
   },
   completed: {
     label: 'Ready',
-    className: 'bg-green-100 text-green-700',
+    className: 'bg-emerald-100 text-emerald-700',
     icon: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -234,6 +234,7 @@ export default function ClassPage() {
   const auth = useAuth();
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const slug = params?.slug as string;
 
   const [classData, setClassData] = useState<Class | null>(null);
@@ -294,6 +295,20 @@ export default function ClassPage() {
       router.push('/signin');
     }
   }, [auth.loading, auth.user, router]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get('tab');
+    if (!requestedTab) return;
+
+    if (requestedTab === 'recordings' || requestedTab === 'books' || requestedTab === 'notes') {
+      setActiveTab(requestedTab);
+      return;
+    }
+
+    if (requestedTab === 'students' && canEditClass) {
+      setActiveTab('students');
+    }
+  }, [searchParams, canEditClass]);
 
   useEffect(() => {
     const loadSession = async () => {
@@ -1229,7 +1244,7 @@ export default function ClassPage() {
   const handleSignOut = async () => {
     try {
       await auth.signOut();
-      router.push('/signin');
+      router.push('/');
     } catch (error) {
       console.error('Sign out error:', error);
     }
@@ -1298,8 +1313,8 @@ export default function ClassPage() {
     return (
       <div className="flex justify-center items-center min-h-screen">
         <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-          <p className="text-gray-600 mt-2">Loading...</p>
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-sky-500"></div>
+          <p className="mt-2 text-stone-600">Loading...</p>
         </div>
       </div>
     );
@@ -1323,11 +1338,11 @@ export default function ClassPage() {
     ? members.find((member) => member.user_id === memberMenu.memberId) ?? null
     : null;
   const renderSectionDropIndicator = () => (
-    <div className="my-3 h-2 rounded-full bg-blue-500/90 shadow-sm" aria-hidden="true" />
+    <div className="my-3 h-2 rounded-full bg-sky-500/90 shadow-sm" aria-hidden="true" />
   );
   const renderDropIndicator = (compact = false) => (
     <div
-      className={`rounded-full bg-blue-500/90 shadow-sm transition-all ${compact ? 'my-1 h-1.5' : 'my-2 h-2'}`}
+      className={`rounded-full bg-sky-500/90 shadow-sm transition-all ${compact ? 'my-1 h-1.5' : 'my-2 h-2'}`}
       aria-hidden="true"
     />
   );
@@ -1355,11 +1370,17 @@ export default function ClassPage() {
             event.stopPropagation();
             void handleDropBook(sectionId, undefined, 'inside');
           }}
-          className={`flex min-h-32 items-center justify-center rounded-xl border-2 border-dashed px-4 py-8 text-sm transition ${isEmptyDropTarget ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-300 bg-gray-50 text-gray-500'}`}
+          className={`flex min-h-32 items-center justify-center rounded-[24px] border-2 border-dashed px-4 py-8 text-sm transition ${isEmptyDropTarget ? 'border-sky-400 bg-sky-50/80 text-sky-700 shadow-[0_12px_28px_rgba(14,165,233,0.12)]' : 'border-stone-300 bg-stone-50/80 text-stone-500'}`}
         >
           <div className="text-center">
-            <p className="font-medium">No books in this section.</p>
-            <p className="mt-1 text-xs opacity-80">Drag a book here to move it in.</p>
+            <div className="mx-auto mb-3 inline-flex items-center gap-2 rounded-full border border-current/20 bg-white/70 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em]">
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16l5 5 5-5M7 8l5-5 5 5" />
+              </svg>
+              Drop Zone
+            </div>
+            <p className="font-medium">Drop books here</p>
+            <p className="mt-1 text-xs opacity-80">This section is empty. Drag a book card into it to place it here.</p>
           </div>
         </div>
       );
@@ -1386,7 +1407,7 @@ export default function ClassPage() {
           event.stopPropagation();
           void handleDropBook(sectionId, undefined, 'inside');
         }}
-        className={`space-y-3 rounded-xl transition ${isEmptyDropTarget ? 'bg-blue-50/60 p-2' : ''}`}
+        className={`space-y-3 rounded-[24px] transition ${isEmptyDropTarget ? 'bg-sky-50/70 p-2.5' : ''}`}
       >
         {sectionBooks.map((book) => (
           <div key={book.id}>
@@ -1426,16 +1447,17 @@ export default function ClassPage() {
                 const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
                 void handleDropBook(sectionId, book.id, placement);
               }}
-              className={`rounded-xl border bg-white p-4 shadow-sm transition-all ${draggedBook?.bookId === book.id ? 'scale-[0.99] opacity-60' : 'opacity-100'} ${bookDropTarget?.sectionId === sectionId && bookDropTarget.targetBookId === book.id ? 'border-blue-300 shadow-md' : 'border-gray-200'} ${canEditClass ? 'cursor-grab active:cursor-grabbing' : ''}`}
+              className={`rounded-[24px] border bg-white/95 p-4 shadow-[0_14px_35px_rgba(15,23,42,0.08)] transition-all ${draggedBook?.bookId === book.id ? 'scale-[0.99] opacity-60' : 'opacity-100'} ${bookDropTarget?.sectionId === sectionId && bookDropTarget.targetBookId === book.id ? 'border-sky-300 shadow-[0_18px_45px_rgba(14,165,233,0.14)]' : 'border-stone-200'} ${canEditClass ? 'cursor-grab active:cursor-grabbing' : ''}`}
             >
               <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start gap-3">
                     {canEditClass && (
-                      <div className="pt-0.5 text-gray-400">
-                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-500 shadow-sm">
+                        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h.01M8 12h.01M8 17h.01M16 7h.01M16 12h.01M16 17h.01" />
                         </svg>
+                        Drag
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
@@ -1463,7 +1485,7 @@ export default function ClassPage() {
                           void handleRenameBook();
                         }}
                         autoFocus
-                        className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-slate-950 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                       />
                     ) : (
                       <button
@@ -1473,17 +1495,20 @@ export default function ClassPage() {
                           setEditingBookId(book.id);
                           setBookTitleDraft(book.title);
                         }}
-                        className={`group inline-flex items-center gap-2 truncate text-left text-base font-semibold text-gray-900 ${canEditClass ? 'hover:text-gray-900' : ''}`}
+                        className={`inline-flex items-center gap-2 truncate text-left text-base font-semibold text-slate-950 ${canEditClass ? 'hover:text-slate-950' : ''}`}
                       >
                         <span className="truncate">{book.title}</span>
                         {canEditClass && (
-                          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 opacity-0 transition-opacity group-hover:opacity-100">
-                            Click to edit
+                          <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-500">
+                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 11l6.768-6.768a2.5 2.5 0 113.536 3.536L12.536 14.536A2 2 0 0111.122 15H8v-3.122A2 2 0 018.586 10.708z" />
+                            </svg>
+                            Edit
                           </span>
                         )}
                       </button>
                     )}
-                      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                      <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-stone-600">
                         <ProcessingStatusBadge
                           bookId={book.id}
                           initialStatus={book.processing_status}
@@ -1505,7 +1530,7 @@ export default function ClassPage() {
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <Link
                     href={`/dashboard/class/${slug}/book/${book.id}`}
-                    className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                    className="rounded-xl bg-slate-950 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
                   >
                     Open
                   </Link>
@@ -1525,7 +1550,7 @@ export default function ClassPage() {
                       }}
                       data-book-menu-trigger={book.id}
                       disabled={processingBookId === book.id || deletingBookId === book.id}
-                      className="rounded-md border border-gray-300 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-xl border border-stone-300 bg-white p-2 text-stone-500 transition hover:border-stone-400 hover:bg-stone-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                       aria-label={`Open actions for ${book.title}`}
                     >
                       <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
@@ -1550,27 +1575,28 @@ export default function ClassPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <div className="min-h-screen bg-[linear-gradient(180deg,_#f8fafc_0%,_#f3f4f6_48%,_#f8fafc_100%)]">
+      <header className="border-b border-stone-200/80 bg-stone-50/90 backdrop-blur">
+        <div className="max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
               <Link
                 href="/dashboard"
-                className="text-gray-600 hover:text-gray-900 transition-colors"
+                className="rounded-full border border-stone-300 bg-white p-2 text-stone-600 transition-colors hover:bg-stone-100 hover:text-slate-900"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
                 </svg>
               </Link>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">{classData.name}</h1>
-                <p className="text-sm text-gray-600">{auth.user.user_metadata?.name || auth.user.email}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-700">Class Workspace</p>
+                <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">{classData.name}</h1>
+                <p className="text-sm text-stone-600">{auth.user.user_metadata?.name || auth.user.email}</p>
               </div>
             </div>
             <button
               onClick={handleSignOut}
-              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
+              className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
             >
               Sign Out
             </button>
@@ -1579,28 +1605,30 @@ export default function ClassPage() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white rounded-lg shadow">
-          <div className="border-b px-6 py-6">
+        <div className="space-y-6">
+          <section className="rounded-[28px] border border-stone-200 bg-white/80 px-6 py-7 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
             <div className="flex items-start justify-between">
-              <div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">{classData.name}</h2>
+              <div className="max-w-3xl">
+                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-700">Smart Learn Interior</p>
+                <h2 className="mt-3 text-4xl font-black tracking-tight text-slate-950">{classData.name}</h2>
                 {classData.description && (
-                  <p className="text-gray-600">{classData.description}</p>
+                  <p className="mt-3 text-base leading-7 text-stone-600">{classData.description}</p>
                 )}
-                <p className="text-sm text-gray-500 mt-2">
+                <p className="mt-3 text-sm text-stone-500">
                   Created {formatDate(classData.created_at)}
                 </p>
               </div>
             </div>
-          </div>
+          </section>
 
-          <div className="border-b">
-            <nav className="flex space-x-8 px-6" aria-label="Tabs">
+          <section className="rounded-[28px] border border-stone-200 bg-white/75 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
+          <div className="border-b border-stone-200/80 px-6 py-4">
+            <nav className="flex flex-wrap gap-2" aria-label="Tabs">
               <button
                 onClick={() => void handleTabChange('recordings')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'recordings'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                className={`rounded-full px-4 py-2.5 font-medium text-sm transition-colors ${activeTab === 'recordings'
+                  ? 'bg-slate-950 text-white'
+                  : 'text-stone-600 hover:bg-stone-100 hover:text-slate-900'
                   }`}
               >
                 <div className="flex items-center gap-2">
@@ -1612,9 +1640,9 @@ export default function ClassPage() {
               </button>
               <button
                 onClick={() => void handleTabChange('books')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'books'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                className={`rounded-full px-4 py-2.5 font-medium text-sm transition-colors ${activeTab === 'books'
+                  ? 'bg-slate-950 text-white'
+                  : 'text-stone-600 hover:bg-stone-100 hover:text-slate-900'
                   }`}
               >
                 <div className="flex items-center gap-2">
@@ -1626,9 +1654,9 @@ export default function ClassPage() {
               </button>
               <button
                 onClick={() => void handleTabChange('notes')}
-                className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'notes'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                className={`rounded-full px-4 py-2.5 font-medium text-sm transition-colors ${activeTab === 'notes'
+                  ? 'bg-slate-950 text-white'
+                  : 'text-stone-600 hover:bg-stone-100 hover:text-slate-900'
                   }`}
               >
                 <div className="flex items-center gap-2">
@@ -1641,9 +1669,9 @@ export default function ClassPage() {
               {canEditClass && (
                 <button
                   onClick={() => void handleTabChange('students')}
-                  className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${activeTab === 'students'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  className={`rounded-full px-4 py-2.5 font-medium text-sm transition-colors ${activeTab === 'students'
+                    ? 'bg-slate-950 text-white'
+                    : 'text-stone-600 hover:bg-stone-100 hover:text-slate-900'
                     }`}
                 >
                   <div className="flex items-center gap-2">
@@ -1660,12 +1688,12 @@ export default function ClassPage() {
           <div className="p-6">
             {activeTab === 'recordings' && (
               <div>
-                <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-lg font-semibold text-gray-900">Class Recordings</h3>
+                <div className="mb-6 flex justify-between items-center">
+                  <h3 className="text-lg font-semibold text-slate-950">Class Recordings</h3>
                   {canEditClass && (
                     <button
                       onClick={() => setVideoUploadModalOpen(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+                      className="flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1675,29 +1703,29 @@ export default function ClassPage() {
                   )}
                 </div>
                 {recordings.length === 0 ? (
-                  <div className="text-center py-12 bg-gray-50 rounded-lg">
-                    <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50/80 py-12 text-center">
+                    <svg className="mx-auto mb-4 h-12 w-12 text-stone-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                     </svg>
-                    <p className="text-gray-500">No recordings yet.</p>
+                    <p className="text-stone-500">No recordings yet.</p>
                   </div>
                 ) : (
-                  <div className="overflow-hidden rounded-lg border border-gray-200">
+                  <div className="overflow-hidden rounded-2xl border border-stone-200 bg-stone-50/60">
                     <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
+                      <table className="min-w-full divide-y divide-stone-200">
+                        <thead className="bg-stone-100/80">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Title</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Status</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Duration</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Uploaded</th>
-                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Action</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">Title</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">Status</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">Duration</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">Uploaded</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-stone-500">Action</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200 bg-white">
+                        <tbody className="divide-y divide-stone-200 bg-white/90">
                           {recordings.map((recording) => (
-                            <tr key={recording.id} className="hover:bg-gray-50">
-                              <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                            <tr key={recording.id} className="hover:bg-stone-50/80">
+                              <td className="px-4 py-4 text-sm font-medium text-slate-950">
                                 {editingRecordingId === recording.id ? (
                                   <input
                                     value={recordingTitleDraft}
@@ -1721,7 +1749,7 @@ export default function ClassPage() {
                                       void handleRenameRecording();
                                     }}
                                     autoFocus
-                                    className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                                   />
                                 ) : (
                                   <button
@@ -1731,30 +1759,33 @@ export default function ClassPage() {
                                       setEditingRecordingId(recording.id);
                                       setRecordingTitleDraft(recording.title);
                                     }}
-                                    className={`group inline-flex items-center gap-2 truncate text-left text-sm font-semibold text-gray-900 ${canEditClass ? 'hover:text-gray-900' : ''}`}
+                                    className={`inline-flex items-center gap-2 truncate text-left text-sm font-semibold text-slate-950 ${canEditClass ? 'hover:text-slate-950' : ''}`}
                                   >
                                     <span className="truncate">{recording.title}</span>
                                     {canEditClass && (
-                                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 opacity-0 transition-opacity group-hover:opacity-100">
-                                        Click to edit
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-500">
+                                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 11l6.768-6.768a2.5 2.5 0 113.536 3.536L12.536 14.536A2 2 0 0111.122 15H8v-3.122A2 2 0 018.586 10.708z" />
+                                        </svg>
+                                        Edit
                                       </span>
                                     )}
                                   </button>
                                 )}
                               </td>
-                              <td className="px-4 py-4 text-sm text-gray-600">
+                              <td className="px-4 py-4 text-sm text-stone-600">
                                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${recordingStatusStyles[recording.processing_status].className}`}>
                                   {recordingStatusStyles[recording.processing_status].icon}
                                   {recordingStatusStyles[recording.processing_status].label}
                                 </span>
                               </td>
-                              <td className="px-4 py-4 text-sm text-gray-600">{formatDuration(recording.duration)}</td>
-                              <td className="px-4 py-4 text-sm text-gray-600">{formatDate(recording.uploaded_at)}</td>
+                              <td className="px-4 py-4 text-sm text-stone-600">{formatDuration(recording.duration)}</td>
+                              <td className="px-4 py-4 text-sm text-stone-600">{formatDate(recording.uploaded_at)}</td>
                               <td className="px-4 py-4 text-right">
                                 <div className="flex items-center justify-end gap-2">
                                   <Link
                                     href={`/dashboard/class/${slug}/video/${recording.id}`}
-                                    className="inline-flex rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                                    className="inline-flex rounded-xl bg-slate-950 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800"
                                   >
                                     Open
                                   </Link>
@@ -1762,7 +1793,7 @@ export default function ClassPage() {
                                     <button
                                       onClick={() => void handleDeleteRecording(recording)}
                                       disabled={deletingRecordingId === recording.id}
-                                      className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                      className="rounded-xl bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
                                     >
                                       {deletingRecordingId === recording.id ? 'Deleting...' : 'Delete'}
                                     </button>
@@ -1783,8 +1814,8 @@ export default function ClassPage() {
               <div className="space-y-6">
                 <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">Books</h3>
-                    <p className="text-sm text-gray-500">Drag books between sections to move them, and drag within a section to reorder them.</p>
+                    <h3 className="text-lg font-semibold text-slate-950">Books</h3>
+                    <p className="text-sm text-stone-500">Use the drag handles to reorder books or move them between sections. Click the pencil icon next to a title to rename it.</p>
                   </div>
                   {canEditClass && (
                     <button
@@ -1792,7 +1823,7 @@ export default function ClassPage() {
                         sectionId: null,
                         startingPosition: unassignedBooks.length,
                       })}
-                      className="flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                      className="flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -1803,10 +1834,10 @@ export default function ClassPage() {
                 </div>
 
                 {canEditClass && (
-                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4">
                     <div className="flex flex-col gap-4 md:flex-row md:items-end">
                       <div className="flex-1">
-                        <label htmlFor="section-title" className="block text-sm font-medium text-gray-700 mb-1">
+                        <label htmlFor="section-title" className="mb-1 block text-sm font-medium text-stone-700">
                           Create Book Section
                         </label>
                         <input
@@ -1815,13 +1846,13 @@ export default function ClassPage() {
                           value={newSectionTitle}
                           onChange={(e) => setNewSectionTitle(e.target.value)}
                           placeholder="e.g., Unit 1 Reading"
-                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
                         />
                       </div>
                       <button
                         onClick={handleCreateSection}
                         disabled={creatingSection || !newSectionTitle.trim()}
-                        className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {creatingSection ? 'Creating...' : 'Add Section'}
                       </button>
@@ -1830,8 +1861,8 @@ export default function ClassPage() {
                 )}
 
                 {organizedSections.length === 0 && unassignedBooks.length === 0 ? (
-                  <div className="text-center py-12 bg-gray-50 rounded-lg">
-                    <p className="text-gray-500">No books yet.</p>
+                  <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50/80 py-12 text-center">
+                    <p className="text-stone-500">No books yet.</p>
                   </div>
                 ) : (
                   <div className="space-y-6">
@@ -1865,17 +1896,18 @@ export default function ClassPage() {
                           const placement = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
                           void handleDropSection(section.id, placement);
                         }}
-                        className={`overflow-hidden rounded-xl border bg-white shadow-sm transition-all ${draggedSectionId === section.id ? 'opacity-60' : 'opacity-100'} ${sectionDropTarget?.sectionId === section.id ? 'border-blue-300 shadow-md' : 'border-gray-200'} ${canEditClass ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                        className={`overflow-hidden rounded-[24px] border bg-white/90 shadow-[0_14px_35px_rgba(15,23,42,0.05)] transition-all ${draggedSectionId === section.id ? 'opacity-60' : 'opacity-100'} ${sectionDropTarget?.sectionId === section.id ? 'border-sky-300 shadow-md' : 'border-stone-200'} ${canEditClass ? 'cursor-grab active:cursor-grabbing' : ''}`}
                       >
-                        <div className="border-b bg-gray-50 px-5 py-4">
+                        <div className="border-b border-stone-200 bg-stone-50/80 px-5 py-4">
                           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                             <div className="min-w-0">
                               <div className="flex items-center gap-3">
                                 {canEditClass && (
-                                  <div className="text-gray-400">
-                                    <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white/90 px-2.5 py-1 text-xs font-medium text-stone-500 shadow-sm">
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h.01M8 12h.01M8 17h.01M16 7h.01M16 12h.01M16 17h.01" />
                                     </svg>
+                                    Drag
                                   </div>
                                 )}
                                 {editingSectionId === section.id ? (
@@ -1902,7 +1934,7 @@ export default function ClassPage() {
                                       void handleRenameSection();
                                     }}
                                     autoFocus
-                                    className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-semibold text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className="rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                                   />
                                 ) : (
                                   <button
@@ -1912,12 +1944,15 @@ export default function ClassPage() {
                                       setEditingSectionId(section.id);
                                       setSectionTitleDraft(section.title);
                                     }}
-                                    className={`group inline-flex items-center gap-2 truncate text-left text-lg font-semibold text-gray-900 ${canEditClass ? 'hover:text-gray-900' : ''}`}
+                                    className={`inline-flex items-center gap-2 truncate text-left text-lg font-semibold text-slate-950 ${canEditClass ? 'hover:text-slate-950' : ''}`}
                                   >
                                     <span className="truncate">{section.title}</span>
                                     {canEditClass && (
-                                      <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-500 opacity-0 transition-opacity group-hover:opacity-100">
-                                        Click to edit
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-500">
+                                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536M9 11l6.768-6.768a2.5 2.5 0 113.536 3.536L12.536 14.536A2 2 0 0111.122 15H8v-3.122A2 2 0 018.586 10.708z" />
+                                        </svg>
+                                        Edit
                                       </span>
                                     )}
                                   </button>
@@ -1932,7 +1967,7 @@ export default function ClassPage() {
                                     sectionId: section.id,
                                     startingPosition: section.books.length,
                                   })}
-                                  className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                                  className="rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white hover:bg-emerald-700"
                                 >
                                   Add Books
                                 </button>
@@ -1950,17 +1985,17 @@ export default function ClassPage() {
                     ))}
 
                     {unassignedBooks.length > 0 && (
-                      <section className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-                        <div className="border-b bg-gray-50 px-5 py-4">
+                      <section className="overflow-hidden rounded-[24px] border border-stone-200 bg-white/90 shadow-[0_14px_35px_rgba(15,23,42,0.05)]">
+                        <div className="border-b border-stone-200 bg-stone-50/80 px-5 py-4">
                           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                             <div>
                               <div className="flex items-center gap-3">
-                                <span className="inline-flex rounded-full bg-gray-600 px-2.5 py-1 text-xs font-semibold text-white">
+                                <span className="inline-flex rounded-full bg-stone-700 px-2.5 py-1 text-xs font-semibold text-white">
                                   Unassigned
                                 </span>
-                                <h4 className="text-lg font-semibold text-gray-900">Unassigned Books</h4>
+                                <h4 className="text-lg font-semibold text-slate-950">Unassigned Books</h4>
                               </div>
-                              <p className="mt-2 text-sm text-gray-600">
+                              <p className="mt-2 text-sm text-stone-600">
                                 {unassignedBooks.length} book{unassignedBooks.length === 1 ? '' : 's'}
                               </p>
                             </div>
@@ -1981,14 +2016,14 @@ export default function ClassPage() {
               <div>
                 <div className="flex justify-between items-center mb-6">
                   <div>
-                    <h3 className="text-lg font-semibold text-gray-900">My Notes</h3>
-                    <p className="text-sm text-gray-500">Markdown supported.</p>
+                    <h3 className="text-lg font-semibold text-slate-950">My Notes</h3>
+                    <p className="text-sm text-stone-500">Markdown supported.</p>
                   </div>
                   {canUseNotes && (
                     <button
                       onClick={() => void handleSaveNote()}
                       disabled={savingNote}
-                      className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {savingNote ? 'Saving...' : 'Save'}
                     </button>
@@ -1999,17 +2034,17 @@ export default function ClassPage() {
                     {noteError}
                   </div>
                 )}
-                <div className="border rounded-lg overflow-hidden">
+                <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white/90">
                   <textarea
                     value={noteContent}
                     onChange={(e) => canUseNotes && setNoteContent(e.target.value)}
                     readOnly={!canUseNotes}
                     placeholder={canUseNotes ? 'Write your markdown notes here...' : 'Notes are unavailable for your access level'}
-                    className="w-full h-96 resize-none px-4 py-3 font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 read-only:bg-gray-50"
+                    className="h-96 w-full resize-none bg-transparent px-5 py-4 text-[15px] leading-7 text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500 read-only:bg-stone-50/70"
                   />
                 </div>
                 {currentNote && currentNote.updated_at && (
-                  <p className="text-xs text-gray-500 mt-2">
+                  <p className="mt-2 text-xs text-stone-500">
                     Last updated: {new Date(currentNote.updated_at).toLocaleString()}
                   </p>
                 )}
@@ -2018,9 +2053,9 @@ export default function ClassPage() {
 
             {activeTab === 'students' && canEditClass && (
               <div className="space-y-6">
-                <div className="flex flex-col gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4 md:flex-row md:items-end">
+                <div className="flex flex-col gap-4 rounded-2xl border border-stone-200 bg-stone-50/80 p-4 md:flex-row md:items-end">
                   <div className="flex-1">
-                    <label htmlFor="member-email" className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="member-email" className="mb-1 block text-sm font-medium text-stone-700">
                       Add Student By Email
                     </label>
                     <input
@@ -2029,18 +2064,18 @@ export default function ClassPage() {
                       value={memberEmail}
                       onChange={(e) => setMemberEmail(e.target.value)}
                       placeholder="student@example.com"
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-sky-500"
                     />
                   </div>
                   <button
                     onClick={handleAddMember}
                     disabled={addingMember || !memberEmail.trim()}
-                    className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {addingMember ? 'Adding...' : 'Add Student'}
                   </button>
                 </div>
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-stone-500">
                   Managers can add or remove students. Owners can also promote managers, demote them, and transfer ownership.
                 </p>
 
@@ -2051,27 +2086,27 @@ export default function ClassPage() {
                 )}
 
                 {membersLoading ? (
-                  <div className="text-center py-12 bg-gray-50 rounded-lg">
-                    <p className="text-gray-500">Loading members...</p>
+                  <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50/80 py-12 text-center">
+                    <p className="text-stone-500">Loading members...</p>
                   </div>
                 ) : members.length === 0 ? (
-                  <div className="text-center py-12 bg-gray-50 rounded-lg">
-                    <p className="text-gray-500">No members have been added to this class yet.</p>
+                  <div className="rounded-2xl border border-dashed border-stone-300 bg-stone-50/80 py-12 text-center">
+                    <p className="text-stone-500">No members have been added to this class yet.</p>
                   </div>
                 ) : (
-                  <div className="overflow-hidden rounded-lg border border-gray-200">
+                  <div className="overflow-hidden rounded-2xl border border-stone-200 bg-stone-50/60">
                     <div className="overflow-x-auto">
-                      <table className="min-w-full divide-y divide-gray-200">
-                        <thead className="bg-gray-50">
+                      <table className="min-w-full divide-y divide-stone-200">
+                        <thead className="bg-stone-100/80">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Name</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Email</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Role</th>
-                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">Added</th>
-                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">Action</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">Name</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">Email</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">Role</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-stone-500">Added</th>
+                            <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-stone-500">Action</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200 bg-white">
+                        <tbody className="divide-y divide-stone-200 bg-white/90">
                           {members.map((member) => {
                             const isCurrentUser = member.user_id === currentUserId;
                             const canRemoveMember = member.role === 'student' || (isOwner && member.role === 'manager');
@@ -2082,18 +2117,18 @@ export default function ClassPage() {
                             const hasActions = canPromoteMember || canDemoteMember || canTransferToMember || canRemoveMember;
 
                             return (
-                              <tr key={member.user_id} className="hover:bg-gray-50">
-                                <td className="px-4 py-4 text-sm font-medium text-gray-900">
+                              <tr key={member.user_id} className="hover:bg-stone-50/80">
+                                <td className="px-4 py-4 text-sm font-medium text-slate-950">
                                   {member.name}
-                                  {isCurrentUser && <span className="ml-2 text-xs text-gray-500">(You)</span>}
+                                  {isCurrentUser && <span className="ml-2 text-xs text-stone-500">(You)</span>}
                                 </td>
-                                <td className="px-4 py-4 text-sm text-gray-600">{member.email}</td>
-                                <td className="px-4 py-4 text-sm text-gray-600">
+                                <td className="px-4 py-4 text-sm text-stone-600">{member.email}</td>
+                                <td className="px-4 py-4 text-sm text-stone-600">
                                   <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${memberRoleStyles[member.role].className}`}>
                                     {memberRoleStyles[member.role].label}
                                   </span>
                                 </td>
-                                <td className="px-4 py-4 text-sm text-gray-600">{formatDate(member.created_at)}</td>
+                                <td className="px-4 py-4 text-sm text-stone-600">{formatDate(member.created_at)}</td>
                                 <td className="px-4 py-4 text-right">
                                   {hasActions ? (
                                     <div className="inline-flex justify-end">
@@ -2112,7 +2147,7 @@ export default function ClassPage() {
                                         }}
                                         data-member-menu-trigger={member.user_id}
                                         disabled={isBusy}
-                                        className="rounded-md border border-gray-300 bg-white p-2 text-gray-500 hover:bg-gray-50 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                        className="rounded-xl border border-stone-300 bg-white p-2 text-stone-500 transition hover:border-stone-400 hover:bg-stone-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
                                         aria-label={`Open actions for ${member.email}`}
                                       >
                                         <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
@@ -2121,7 +2156,7 @@ export default function ClassPage() {
                                       </button>
                                     </div>
                                   ) : (
-                                    <span className="text-xs text-gray-400">No actions</span>
+                                    <span className="text-xs text-stone-400">No actions</span>
                                   )}
                                 </td>
                               </tr>
@@ -2135,6 +2170,7 @@ export default function ClassPage() {
               </div>
             )}
           </div>
+        </section>
         </div>
       </div>
 
@@ -2152,18 +2188,18 @@ export default function ClassPage() {
       {bookMenu && activeBookMenuBook && (
         <div
           ref={bookMenuRef}
-          className="fixed z-50 min-w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-xl"
+          className="fixed z-50 min-w-52 overflow-hidden rounded-2xl border border-stone-200 bg-white/95 py-1 shadow-[0_22px_60px_rgba(15,23,42,0.16)] backdrop-blur"
           style={{ top: bookMenu.top, left: bookMenu.left }}
         >
           <button
             onClick={() => void handleProcessBook(activeBookMenuBook)}
-            className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+            className="block w-full px-4 py-2.5 text-left text-sm font-medium text-stone-700 hover:bg-stone-50"
           >
             {processingBookId === activeBookMenuBook.id ? 'Processing...' : 'Process PDF'}
           </button>
           <button
             onClick={() => void handleDeleteBook(activeBookMenuBook)}
-            className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+            className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
           >
             {deletingBookId === activeBookMenuBook.id ? 'Deleting...' : 'Delete'}
           </button>
@@ -2173,13 +2209,13 @@ export default function ClassPage() {
       {memberMenu && activeMemberMenuMember && (
         <div
           ref={memberMenuRef}
-          className="fixed z-50 min-w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-xl"
+          className="fixed z-50 min-w-52 overflow-hidden rounded-2xl border border-stone-200 bg-white/95 py-1 shadow-[0_22px_60px_rgba(15,23,42,0.16)] backdrop-blur"
           style={{ top: memberMenu.top, left: memberMenu.left }}
         >
           {isOwner && activeMemberMenuMember.role === 'student' && (
             <button
               onClick={() => void handleChangeMemberRole(activeMemberMenuMember, 'manager')}
-              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+              className="block w-full px-4 py-2.5 text-left text-sm font-medium text-stone-700 hover:bg-stone-50"
             >
               Make Manager
             </button>
@@ -2187,7 +2223,7 @@ export default function ClassPage() {
           {isOwner && activeMemberMenuMember.role === 'manager' && (
             <button
               onClick={() => void handleChangeMemberRole(activeMemberMenuMember, 'student')}
-              className="block w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+              className="block w-full px-4 py-2.5 text-left text-sm font-medium text-stone-700 hover:bg-stone-50"
             >
               Make Student
             </button>
@@ -2195,7 +2231,7 @@ export default function ClassPage() {
           {isOwner && activeMemberMenuMember.role !== 'owner' && (
             <button
               onClick={() => openTransferOwnershipDialog(activeMemberMenuMember)}
-              className="block w-full px-4 py-2 text-left text-sm text-amber-700 hover:bg-amber-50"
+              className="block w-full px-4 py-2.5 text-left text-sm font-medium text-amber-700 hover:bg-amber-50"
             >
               Transfer Ownership
             </button>
@@ -2203,7 +2239,7 @@ export default function ClassPage() {
           {(activeMemberMenuMember.role === 'student' || (isOwner && activeMemberMenuMember.role === 'manager')) && (
             <button
               onClick={() => void handleRemoveMember(activeMemberMenuMember)}
-              className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+              className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
             >
               Remove
             </button>
@@ -2212,20 +2248,21 @@ export default function ClassPage() {
       )}
 
       {transferOwnershipTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/40 px-4">
-          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-[28px] border border-stone-200 bg-white/95 p-6 shadow-[0_28px_80px_rgba(15,23,42,0.18)]">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h4 className="text-lg font-semibold text-gray-900">Transfer Ownership</h4>
-                <p className="mt-2 text-sm text-gray-600">
-                  Type <span className="font-medium text-gray-900">{transferOwnershipTarget.email}</span> to confirm transferring ownership.
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">Sensitive Action</p>
+                <h4 className="mt-2 text-lg font-semibold text-slate-950">Transfer Ownership</h4>
+                <p className="mt-2 text-sm leading-7 text-stone-600">
+                  Type <span className="font-medium text-slate-950">{transferOwnershipTarget.email}</span> to confirm transferring ownership.
                   You will become a manager after this change.
                 </p>
               </div>
               <button
                 onClick={closeTransferOwnershipDialog}
                 disabled={updatingMemberId === transferOwnershipTarget.user_id}
-                className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-xl p-1.5 text-stone-400 hover:bg-stone-100 hover:text-stone-600 disabled:cursor-not-allowed disabled:opacity-50"
                 aria-label="Close transfer ownership dialog"
               >
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2235,7 +2272,7 @@ export default function ClassPage() {
             </div>
 
             <div className="mt-5">
-              <label htmlFor="transfer-ownership-email" className="block text-sm font-medium text-gray-700">
+              <label htmlFor="transfer-ownership-email" className="block text-sm font-medium text-stone-700">
                 Confirm with email
               </label>
               <input
@@ -2249,7 +2286,7 @@ export default function ClassPage() {
                   }
                 }}
                 placeholder={transferOwnershipTarget.email}
-                className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                className="mt-2 w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-amber-500"
               />
               {transferOwnershipError && (
                 <p className="mt-2 text-sm text-red-600">{transferOwnershipError}</p>
@@ -2260,14 +2297,14 @@ export default function ClassPage() {
               <button
                 onClick={closeTransferOwnershipDialog}
                 disabled={updatingMemberId === transferOwnershipTarget.user_id}
-                className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-xl border border-stone-300 bg-white px-4 py-2.5 text-sm font-medium text-stone-700 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={() => void handleTransferOwnership()}
                 disabled={updatingMemberId === transferOwnershipTarget.user_id}
-                className="rounded-md bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-xl bg-amber-500 px-4 py-2.5 text-sm font-medium text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {updatingMemberId === transferOwnershipTarget.user_id ? 'Transferring...' : 'Transfer Ownership'}
               </button>
