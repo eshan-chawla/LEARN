@@ -17,7 +17,7 @@ A Next.js application that helps students organize their classes, upload PDFs wi
 - **Backend**: Supabase (PostgreSQL + Auth)
 - **Asset Storage**: AWS S3
 - **PDF Processing**: Modal serverless functions
-- **Embeddings**: Sentence Transformers (all-MiniLM-L6-v2)
+- **Embeddings**: Qwen/Qwen3-Embedding-0.6B
 - **Vector Storage**: Qdrant
 
 ## Getting Started
@@ -84,7 +84,7 @@ modal secret create qdrant-credentials QDRANT_URL=... QDRANT_API_KEY=...
 modal secret create modal-webhook-secret MODAL_WEBHOOK_SECRET=...
 
 # Deploy
-modal deploy modal/pdf_processor.py
+modal deploy modal/app.py
 ```
 
 After deployment, copy the webhook URL to your `.env.local`.
@@ -112,7 +112,11 @@ learn/
 │   ├── 01_SETUP_EVERYTHING.sql
 │   └── README.md
 ├── modal/                    # Modal serverless functions
-│   ├── pdf_processor.py      # PDF processing function
+│   ├── app.py                # Modal app entrypoint
+│   ├── jobs/                 # Background jobs
+│   ├── webhooks/             # Webhook entrypoints
+│   ├── lib/                  # Shared helpers
+│   ├── pdf_processor.py      # Backward-compatible deploy shim
 │   ├── requirements.txt      # Python dependencies
 │   └── DEPLOYMENT.md         # Deployment guide
 └── utils/                    # Utility functions
@@ -130,7 +134,7 @@ learn/
    - Downloads the PDF from S3
    - Extracts text page-by-page
    - Splits each page into chunks (500 words with 50 word overlap)
-   - Generates embeddings using Sentence Transformers
+   - Generates embeddings using Qwen/Qwen3-Embedding-0.6B
    - Stores vectors in a shared Qdrant collection with `class_id`, `content_type`, `file_name`, and `page_number`
    - Updates `books.processing_status` in Supabase
 

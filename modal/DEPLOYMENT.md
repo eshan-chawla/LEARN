@@ -2,6 +2,11 @@
 
 This service processes PDFs from S3, chunks them page-by-page, embeds them, and stores them in a shared Qdrant collection.
 
+Embedding model:
+- `Qwen/Qwen3-Embedding-0.6B`
+- `1024`-dimensional vectors
+- Modal worker target: `L4`
+
 ## Architecture
 
 ```text
@@ -85,6 +90,12 @@ modal secret create modal-webhook-secret \
 ## 3. Deploy
 
 ```bash
+modal deploy modal/app.py
+```
+
+Legacy compatibility entrypoint still exists:
+
+```bash
 modal deploy modal/pdf_processor.py
 ```
 
@@ -131,6 +142,10 @@ Each point currently stores:
 
 This schema is designed so video transcript ingestion can later reuse the same collection with `content_type = video`.
 
+Collection vector config:
+- size: `1024`
+- distance: `Cosine`
+
 ## 7. Current status tracking
 
 The worker updates `books.processing_status`:
@@ -161,6 +176,12 @@ modal app logs pdf-processor
 
 ## 9. Notes
 
+- The service is now structured for multiple jobs:
+  - `modal/app.py` for the Modal app and shared image
+  - `modal/jobs/` for background workers
+  - `modal/webhooks/` for webhook entrypoints
+  - `modal/lib/` for shared helpers
 - The service currently chunks per page to preserve page metadata.
+- The embedding worker uses `Qwen/Qwen3-Embedding-0.6B`, which requires `transformers>=4.51.0`.
 - The collection is shared across classes; retrieval must always filter by `class_id`.
 - Later video transcript ingestion should use the same collection and set `content_type = video`.

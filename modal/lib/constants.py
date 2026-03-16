@@ -1,0 +1,3 @@
+SHARED_COLLECTION_NAME = "class_content_embeddings"
+EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
+EMBEDDING_VECTOR_SIZE = 1024

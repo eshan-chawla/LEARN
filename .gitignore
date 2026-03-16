@@ -1,0 +1,6 @@
+__pycache__/
+qdrant/.env
+.env
+.env.*
+!.env.example
+!.env.*.example

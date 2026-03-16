@@ -1,5 +1,7 @@
 boto3==1.34.131
+fastapi[standard]==0.115.0
+httpx==0.24.1
 pypdf==4.2.0
 sentence-transformers==2.7.0
+transformers==4.51.3
 qdrant-client==1.7.0
-supabase==2.3.0
