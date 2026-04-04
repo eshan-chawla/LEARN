@@ -17,7 +17,7 @@ A Next.js application that helps students organize their classes, upload PDFs wi
 - **Backend**: Supabase (PostgreSQL + Auth)
 - **Asset Storage**: AWS S3
 - **PDF Processing**: Modal serverless functions
-- **Embeddings**: Qwen/Qwen3-Embedding-0.6B
+- **Embeddings**: Gemini `gemini-embedding-001`
 - **Vector Storage**: Qdrant
 
 ## Getting Started
@@ -64,6 +64,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 # Modal Configuration (for PDF processing)
 MODAL_WEBHOOK_URL=your-modal-webhook-url
 MODAL_WEBHOOK_SECRET=your-modal-webhook-secret
+MODAL_RETRIEVAL_WEBHOOK_URL=your-modal-retrieval-webhook-url
 ```
 
 ### 4. Deploy PDF Processing to Modal
@@ -79,6 +80,7 @@ modal token new
 
 # Create secrets (see DEPLOYMENT.md for details)
 modal secret create aws-s3-credentials AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=... AWS_S3_RECORDINGS_BUCKET=...
+modal secret create gemini-api-key GEMINI_API_KEY=...
 modal secret create supabase-credentials SUPABASE_URL=... SUPABASE_SERVICE_KEY=...
 modal secret create qdrant-credentials QDRANT_URL=... QDRANT_API_KEY=...
 modal secret create modal-webhook-secret MODAL_WEBHOOK_SECRET=...
@@ -134,9 +136,18 @@ learn/
    - Downloads the PDF from S3
    - Extracts text page-by-page
    - Splits each page into chunks (500 words with 50 word overlap)
-   - Generates embeddings using Qwen/Qwen3-Embedding-0.6B
+   - Generates embeddings using Gemini `gemini-embedding-001`
    - Stores vectors in a shared Qdrant collection with `class_id`, `content_type`, `file_name`, and `page_number`
    - Updates `books.processing_status` in Supabase
+
+### Retrieval Flow
+
+1. Client calls a Vercel retrieval route with the class ID and search query
+2. Next.js verifies the user can access that class
+3. Next.js forwards the request to the Modal retrieval webhook
+4. Modal generates the query embedding with the same embedding model used for PDF ingestion
+5. Modal searches Qdrant with a required `class_id` filter and optional content/source filters
+6. Ranked chunks and metadata are returned back through the Next.js API route
 
 ### Authentication
 

@@ -11,7 +11,9 @@ from typing import Any, Dict
 import modal
 
 from jobs.process_pdf import process_pdf_impl
+from jobs.search_content import search_content_impl
 from webhooks.process_pdf import process_pdf_webhook_impl
+from webhooks.search_content import search_content_webhook_impl
 
 BASE_DIR = Path(__file__).resolve().parent
 
@@ -22,11 +24,10 @@ image = (
     .pip_install(
         "boto3==1.34.131",
         "fastapi[standard]==0.115.0",
-        "httpx==0.24.1",
+        "google-genai==1.62.0",
+        "httpx>=0.27,<1",
         "pypdf==4.2.0",
         "qdrant-client==1.7.0",
-        "sentence-transformers==2.7.0",
-        "transformers==4.51.3",
     )
     .add_local_dir(str(BASE_DIR / "jobs"), remote_path="/root/jobs")
     .add_local_dir(str(BASE_DIR / "webhooks"), remote_path="/root/webhooks")
@@ -37,13 +38,13 @@ process_pdf = app.function(
     image=image,
     secrets=[
         modal.Secret.from_name("aws-s3-credentials"),
+        modal.Secret.from_name("gemini-api-key"),
         modal.Secret.from_name("supabase-credentials"),
         modal.Secret.from_name("qdrant-credentials"),
         modal.Secret.from_name("modal-webhook-secret"),
     ],
     timeout=900,
-    memory=8192,
-    gpu="L4",
+    memory=4096,
 )(process_pdf_impl)
 
 
@@ -59,4 +60,22 @@ def process_pdf_webhook(data: Dict[str, Any]) -> Dict[str, Any]:
             storage_path,
             file_name,
         ),
+    )
+
+
+@app.function(
+    image=image,
+    secrets=[
+        modal.Secret.from_name("gemini-api-key"),
+        modal.Secret.from_name("qdrant-credentials"),
+        modal.Secret.from_name("modal-webhook-secret"),
+    ],
+    timeout=300,
+    memory=2048,
+)
+@modal.fastapi_endpoint(method="POST")
+def search_content_webhook(data: Dict[str, Any]) -> Dict[str, Any]:
+    return search_content_webhook_impl(
+        data,
+        perform_search=search_content_impl,
     )

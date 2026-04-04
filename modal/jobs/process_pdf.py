@@ -7,10 +7,10 @@ from typing import Any, Dict, List
 
 from lib.chunking import extract_page_chunks
 from lib.constants import (
-    EMBEDDING_MODEL_NAME,
     EMBEDDING_VECTOR_SIZE,
     SHARED_COLLECTION_NAME,
 )
+from lib.embeddings import encode_documents
 
 
 def update_book_status(
@@ -61,8 +61,6 @@ def process_pdf_impl(
         PointStruct,
         VectorParams,
     )
-    from sentence_transformers import SentenceTransformer
-    import torch
 
     supabase_url = os.environ["SUPABASE_URL"]
     supabase_service_key = os.environ["SUPABASE_SERVICE_KEY"]
@@ -95,14 +93,13 @@ def process_pdf_impl(
         if not page_chunks:
             raise ValueError("No extractable text found in PDF")
 
-        model = SentenceTransformer(
-            EMBEDDING_MODEL_NAME,
-            device="cuda" if torch.cuda.is_available() else "cpu",
+        embeddings = encode_documents(
+            [chunk["text"] for chunk in page_chunks],
+            title=title,
         )
         points: List[PointStruct] = []
 
-        for global_index, chunk in enumerate(page_chunks):
-            embedding = model.encode(chunk["text"], convert_to_numpy=True).tolist()
+        for global_index, (chunk, embedding) in enumerate(zip(page_chunks, embeddings)):
             points.append(
                 PointStruct(
                     id=str(uuid.uuid4()),

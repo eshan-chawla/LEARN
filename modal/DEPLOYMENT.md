@@ -3,9 +3,12 @@
 This service processes PDFs from S3, chunks them page-by-page, embeds them, and stores them in a shared Qdrant collection.
 
 Embedding model:
-- `Qwen/Qwen3-Embedding-0.6B`
-- `1024`-dimensional vectors
-- Modal worker target: `L4`
+- `gemini-embedding-001`
+- `768`-dimensional vectors
+- task types:
+  - `RETRIEVAL_DOCUMENT` for indexed chunks
+  - `RETRIEVAL_QUERY` for search queries
+- runtime target: CPU-only Modal containers
 
 ## Architecture
 
@@ -15,6 +18,7 @@ Vercel -> books row in Supabase
 Vercel /api/process-pdf -> Modal webhook
 Modal -> S3 download -> chunk/embed -> Qdrant
 Modal -> books.processing_status update in Supabase
+Vercel /api/retrieval/* -> Modal retrieval webhook -> Qdrant search
 ```
 
 Qdrant collection:
@@ -78,6 +82,13 @@ modal secret create qdrant-credentials \
   QDRANT_API_KEY=""
 ```
 
+### Gemini secret
+
+```bash
+modal secret create gemini-api-key \
+  GEMINI_API_KEY=your-gemini-api-key
+```
+
 ### Webhook secret
 
 Use one random shared secret between Vercel and Modal.
@@ -100,6 +111,7 @@ modal deploy modal/pdf_processor.py
 ```
 
 Copy the generated webhook URL.
+You will have one URL for PDF processing and one URL for retrieval search.
 
 ## 4. Configure Vercel / Next.js
 
@@ -108,6 +120,7 @@ Set these env vars in Vercel and `.env.local`:
 ```bash
 MODAL_WEBHOOK_URL=https://your-username--pdf-processor-process-pdf-webhook.modal.run
 MODAL_WEBHOOK_SECRET=your-random-shared-secret
+MODAL_RETRIEVAL_WEBHOOK_URL=https://your-username--pdf-processor-search-content-webhook.modal.run
 ```
 
 ## 5. Request contract
@@ -122,6 +135,19 @@ Vercel sends this payload to Modal:
   "title": "Linear Algebra Notes",
   "storage_path": "books/class-id/123_file.pdf",
   "file_name": "Linear Algebra Notes.pdf"
+}
+```
+
+Retrieval requests send this payload:
+
+```json
+{
+  "webhook_secret": "shared-secret",
+  "query": "spectral theorem",
+  "class_id": "uuid",
+  "content_types": ["pdf"],
+  "source_ids": ["uuid"],
+  "limit": 8
 }
 ```
 
@@ -143,7 +169,7 @@ Each point currently stores:
 This schema is designed so video transcript ingestion can later reuse the same collection with `content_type = video`.
 
 Collection vector config:
-- size: `1024`
+- size: `768`
 - distance: `Cosine`
 
 ## 7. Current status tracking
@@ -174,7 +200,16 @@ modal app logs pdf-processor
 6. Confirm Qdrant has points in `class_content_embeddings`
 7. Inspect payload metadata for `class_id`, `content_type`, `file_name`, and `page_number`
 
-## 9. Notes
+## 9. Reset for Gemini migration
+
+If you are switching from an older embedding model, recreate the collection before reprocessing PDFs:
+
+```bash
+python3 qdrant/create_collection.py --env-file .env.local --recreate
+```
+
+This keeps the collection name the same but resets it to the new vector size.
+## 10. Notes
 
 - The service is now structured for multiple jobs:
   - `modal/app.py` for the Modal app and shared image
@@ -182,6 +217,7 @@ modal app logs pdf-processor
   - `modal/webhooks/` for webhook entrypoints
   - `modal/lib/` for shared helpers
 - The service currently chunks per page to preserve page metadata.
-- The embedding worker uses `Qwen/Qwen3-Embedding-0.6B`, which requires `transformers>=4.51.0`.
+- The embedding worker uses Gemini's hosted embeddings through the `google-genai` SDK.
+- For non-`3072` Gemini dimensions, embeddings are normalized before they are stored or queried.
 - The collection is shared across classes; retrieval must always filter by `class_id`.
 - Later video transcript ingestion should use the same collection and set `content_type = video`.

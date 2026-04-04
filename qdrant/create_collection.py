@@ -13,7 +13,7 @@ from urllib import error, parse, request
 
 
 DEFAULT_COLLECTION_NAME = "class_content_embeddings"
-DEFAULT_VECTOR_SIZE = 1024
+DEFAULT_VECTOR_SIZE = 768
 DEFAULT_DISTANCE = "Cosine"
 ENV_FILE_PATH = Path(__file__).with_name(".env")
 

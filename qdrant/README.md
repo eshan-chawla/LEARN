@@ -5,7 +5,7 @@ This directory contains a standalone setup script for the shared Smart Learn Qdr
 ## What it creates
 
 - collection: `class_content_embeddings`
-- vector size: `1024`
+- vector size: `768`
 - distance: `Cosine`
 - payload indexes:
   - `class_id` as `uuid`
