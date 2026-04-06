@@ -1,5 +1,6 @@
 'use client';
 
+import { ProfileMenu } from '@/components/ProfileMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
@@ -176,15 +177,6 @@ export default function DashboardPage() {
     }
   }, [auth.user, loadClasses, loadUserProfile]);
 
-  const handleSignOut = async () => {
-    try {
-      await auth.signOut();
-      router.push('/');
-    } catch (error) {
-      console.error('Sign out error:', error);
-    }
-  };
-
   const handleCreateClass = async () => {
     if (!newClassName.trim() || !auth.user) return;
     if (!userProfile?.is_teacher) {
@@ -243,7 +235,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,_#f8fafc_0%,_#f3f4f6_48%,_#f8fafc_100%)]">
       {/* Header */}
-      <header className="border-b border-stone-200/80 bg-stone-50/90 backdrop-blur">
+      <header className="relative z-30 border-b border-stone-200/80 bg-stone-50/90 backdrop-blur">
         <div className="max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
             <div>
@@ -251,12 +243,7 @@ export default function DashboardPage() {
               <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-950">Workspace</h1>
               <p className="text-sm text-stone-600">Welcome back, {displayName}</p>
             </div>
-            <button
-              onClick={handleSignOut}
-              className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
-            >
-              Sign Out
-            </button>
+            <ProfileMenu />
           </div>
         </div>
       </header>

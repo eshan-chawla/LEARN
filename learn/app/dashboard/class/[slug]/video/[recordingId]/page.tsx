@@ -1,5 +1,6 @@
 'use client';
 
+import { ProfileMenu } from '@/components/ProfileMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
@@ -170,15 +171,6 @@ export default function VideoViewerPage() {
     }
   }, []);
 
-  const handleSignOut = async () => {
-    try {
-      await auth.signOut();
-      router.push('/');
-    } catch (signOutError) {
-      console.error('Sign out error:', signOutError);
-    }
-  };
-
   if (auth.loading || loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -253,12 +245,7 @@ export default function VideoViewerPage() {
                 </p>
               </div>
             </div>
-            <button
-              onClick={handleSignOut}
-              className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors"
-            >
-              Sign Out
-            </button>
+            <ProfileMenu />
           </div>
         </div>
       </header>

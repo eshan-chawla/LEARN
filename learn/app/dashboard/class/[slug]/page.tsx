@@ -1,5 +1,6 @@
 'use client';
 
+import { ProfileMenu } from '@/components/ProfileMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -1241,15 +1242,6 @@ export default function ClassPage() {
     }
   };
 
-  const handleSignOut = async () => {
-    try {
-      await auth.signOut();
-      router.push('/');
-    } catch (error) {
-      console.error('Sign out error:', error);
-    }
-  };
-
   const savedNoteContent = currentNote?.content || '';
   const hasUnsavedNoteChanges = canUseNotes && activeTab === 'notes' && noteContent !== savedNoteContent;
 
@@ -1576,7 +1568,7 @@ export default function ClassPage() {
 
   return (
     <div className="min-h-screen bg-[linear-gradient(180deg,_#f8fafc_0%,_#f3f4f6_48%,_#f8fafc_100%)]">
-      <header className="border-b border-stone-200/80 bg-stone-50/90 backdrop-blur">
+      <header className="relative z-30 border-b border-stone-200/80 bg-stone-50/90 backdrop-blur">
         <div className="max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
             <div className="flex items-center gap-4">
@@ -1594,12 +1586,7 @@ export default function ClassPage() {
                 <p className="text-sm text-stone-600">{auth.user.user_metadata?.name || auth.user.email}</p>
               </div>
             </div>
-            <button
-              onClick={handleSignOut}
-              className="rounded-xl border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-100 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
-            >
-              Sign Out
-            </button>
+            <ProfileMenu />
           </div>
         </div>
       </header>
