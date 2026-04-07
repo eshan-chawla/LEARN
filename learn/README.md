@@ -72,6 +72,10 @@ MODAL_WEBHOOK_URL=your-modal-webhook-url
 MODAL_VIDEO_WEBHOOK_URL=your-modal-video-webhook-url
 MODAL_WEBHOOK_SECRET=your-modal-webhook-secret
 MODAL_RETRIEVAL_WEBHOOK_URL=your-modal-retrieval-webhook-url
+
+# Qdrant Configuration (server-side routes)
+QDRANT_URL=your-qdrant-url
+QDRANT_API_KEY=your-qdrant-api-key
 ```
 
 ### 4. Deploy Processing to Modal

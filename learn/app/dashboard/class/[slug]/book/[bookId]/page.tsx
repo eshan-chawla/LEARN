@@ -1,6 +1,7 @@
 'use client';
 
 import { BookAskAIPanel } from '@/components/BookAskAIPanel';
+import { BookNotesPanel } from '@/components/BookNotesPanel';
 import { ProfileMenu } from '@/components/ProfileMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
@@ -43,9 +44,19 @@ interface BookResponse {
   classSlug: string;
 }
 
+interface Note {
+  id: string;
+  class_id: string;
+  user_id: string;
+  content: string | null;
+  updated_at: string;
+}
+
 interface OrganizedSidebarSection extends BookSectionData {
   books: SidebarBookData[];
 }
+
+type RightPanelMode = 'ask-ai' | 'notes';
 
 const bookStatusAccent: Record<string, string> = {
   completed: 'bg-emerald-500',
@@ -60,6 +71,32 @@ const MAX_AI_PANEL_WIDTH = 720;
 const MIN_VIEWER_WIDTH = 420;
 const AI_PANEL_WIDTH_STORAGE_KEY = 'smart-learn-book-ask-ai-width';
 const AI_PANEL_OPEN_STORAGE_KEY_PREFIX = 'smart-learn-book-ask-ai-open';
+const RIGHT_PANEL_MODE_STORAGE_KEY_PREFIX = 'smart-learn-book-right-panel-mode';
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message) return error.message;
+
+  if (typeof error === 'object' && error !== null) {
+    if ('message' in error) {
+      const message = (error as { message?: unknown }).message;
+      if (typeof message === 'string' && message.trim()) return message;
+    }
+
+    if ('details' in error) {
+      const details = (error as { details?: unknown }).details;
+      if (typeof details === 'string' && details.trim()) return details;
+    }
+
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== '{}') return serialized;
+    } catch {
+      // Ignore serialization issues and use the fallback below.
+    }
+  }
+
+  return fallback;
+}
 
 export default function BookViewerPage() {
   const auth = useAuth();
@@ -76,19 +113,28 @@ export default function BookViewerPage() {
   const [viewerUrl, setViewerUrl] = useState('');
   const [viewerBaseUrl, setViewerBaseUrl] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [rightPanelMode, setRightPanelMode] = useState<RightPanelMode | null>(null);
   const [aiPanelWidth, setAiPanelWidth] = useState(DEFAULT_AI_PANEL_WIDTH);
   const [isAiPanelResizing, setIsAiPanelResizing] = useState(false);
   const [sidebarLoading, setSidebarLoading] = useState(true);
   const [bookSections, setBookSections] = useState<BookSectionData[]>([]);
   const [sidebarBooks, setSidebarBooks] = useState<SidebarBookData[]>([]);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [currentNote, setCurrentNote] = useState<Note | null>(null);
+  const [noteContent, setNoteContent] = useState('');
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
   const loadingRef = useRef(false);
   const loadedBookIdRef = useRef<string | null>(null);
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
   const pendingAiPanelWidthRef = useRef(aiPanelWidth);
+  const accessTokenRef = useRef<string | null>(null);
+  const classIdRef = useRef<string | null>(null);
+  const noteContentRef = useRef('');
+  const currentNoteContentRef = useRef('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -112,24 +158,39 @@ export default function BookViewerPage() {
 
     const shouldOpenFromQuery = searchParams?.get('ask-ai') === 'open';
     if (shouldOpenFromQuery) {
-      setAiPanelOpen(true);
+      setRightPanelMode('ask-ai');
       return;
     }
 
-    const storedValue = window.sessionStorage.getItem(
+    const nextStorageKey = `${RIGHT_PANEL_MODE_STORAGE_KEY_PREFIX}:${slug}`;
+    const storedMode = window.sessionStorage.getItem(nextStorageKey);
+
+    if (storedMode === 'ask-ai' || storedMode === 'notes') {
+      setRightPanelMode(storedMode);
+      return;
+    }
+
+    const legacyValue = window.sessionStorage.getItem(
       `${AI_PANEL_OPEN_STORAGE_KEY_PREFIX}:${slug}`
     );
-    setAiPanelOpen(storedValue === 'true');
+    setRightPanelMode(legacyValue === 'true' ? 'ask-ai' : null);
   }, [searchParams, slug]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !slug) return;
 
+    const modeKey = `${RIGHT_PANEL_MODE_STORAGE_KEY_PREFIX}:${slug}`;
+    if (rightPanelMode) {
+      window.sessionStorage.setItem(modeKey, rightPanelMode);
+    } else {
+      window.sessionStorage.removeItem(modeKey);
+    }
+
     window.sessionStorage.setItem(
       `${AI_PANEL_OPEN_STORAGE_KEY_PREFIX}:${slug}`,
-      aiPanelOpen ? 'true' : 'false'
+      rightPanelMode === 'ask-ai' ? 'true' : 'false'
     );
-  }, [aiPanelOpen, slug]);
+  }, [rightPanelMode, slug]);
 
   useEffect(() => {
     return () => {
@@ -143,6 +204,37 @@ export default function BookViewerPage() {
   useEffect(() => {
     pendingAiPanelWidthRef.current = aiPanelWidth;
   }, [aiPanelWidth]);
+
+  useEffect(() => {
+    noteContentRef.current = noteContent;
+  }, [noteContent]);
+
+  useEffect(() => {
+    currentNoteContentRef.current = currentNote?.content || '';
+  }, [currentNote]);
+
+  useEffect(() => {
+    classIdRef.current = bookResponse?.book.class_id ?? null;
+  }, [bookResponse?.book.class_id]);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!auth.user) {
+      accessTokenRef.current = null;
+      return;
+    }
+
+    void supabase.auth.getSession().then(({ data: { session } }) => {
+      if (active) {
+        accessTokenRef.current = session?.access_token ?? null;
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [auth.user]);
 
   const loadSidebar = useCallback(async (classId: string, currentBookId: string) => {
     try {
@@ -209,6 +301,8 @@ export default function BookViewerPage() {
         throw new Error('No authentication token');
       }
 
+      accessTokenRef.current = session.access_token;
+
       const response = await fetch(`/api/books/${bookId}`, {
         headers: {
           Authorization: `Bearer ${session.access_token}`,
@@ -259,6 +353,95 @@ export default function BookViewerPage() {
     }
   }, [bookId, loadSidebar, searchParams]);
 
+  const loadNote = useCallback(async (classId: string) => {
+    if (!auth.user) return;
+
+    try {
+      setNotesLoading(true);
+      setNoteError(null);
+
+      const { data, error } = await supabase
+        .from('notes')
+        .select('id, class_id, user_id, content, updated_at')
+        .eq('class_id', classId)
+        .eq('user_id', auth.user.id)
+        .maybeSingle();
+
+      if (error) throw error;
+
+      const nextNote = (data as Note | null) ?? null;
+      setCurrentNote(nextNote);
+      setNoteContent(nextNote?.content || '');
+    } catch (loadNoteError: unknown) {
+      console.error('Error loading notes:', loadNoteError);
+      setCurrentNote(null);
+      setNoteContent('');
+      setNoteError(getErrorMessage(loadNoteError, 'Failed to load notes'));
+    } finally {
+      setNotesLoading(false);
+    }
+  }, [auth.user]);
+
+  const persistNote = useCallback(async (content: string, options?: { background?: boolean }) => {
+    const classId = classIdRef.current;
+    if (!classId || !auth.user) return true;
+
+    const payload = {
+      classId,
+      content,
+    };
+
+    if (options?.background) {
+      const token = accessTokenRef.current;
+      if (!token) return false;
+
+      fetch('/api/notes/save', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      }).catch((backgroundError) => {
+        console.error('Background note save error:', backgroundError);
+      });
+
+      return true;
+    }
+
+    setSavingNote(true);
+    setNoteError(null);
+
+    try {
+      const { data, error } = await supabase
+        .from('notes')
+        .upsert(
+          {
+            class_id: classId,
+            user_id: auth.user.id,
+            content,
+          },
+          {
+            onConflict: 'class_id,user_id',
+          }
+        )
+        .select()
+        .single();
+
+      if (error || !data) throw error || new Error('Failed to save note');
+
+      setCurrentNote(data as Note);
+      return true;
+    } catch (saveError: unknown) {
+      console.error('Error saving note:', saveError);
+      setNoteError(getErrorMessage(saveError, 'Failed to save note'));
+      return false;
+    } finally {
+      setSavingNote(false);
+    }
+  }, [auth.user]);
+
   useEffect(() => {
     if (!auth.loading && !auth.user) {
       router.push('/signin');
@@ -270,6 +453,12 @@ export default function BookViewerPage() {
       void loadBook();
     }
   }, [auth.user, bookId, loadBook]);
+
+  useEffect(() => {
+    if (auth.user && bookResponse?.book.class_id) {
+      void loadNote(bookResponse.book.class_id);
+    }
+  }, [auth.user, bookResponse?.book.class_id, loadNote]);
 
   const toggleSection = (sectionKey: string) => {
     setExpandedSections((current) => ({
@@ -331,6 +520,62 @@ export default function BookViewerPage() {
     window.addEventListener('mouseup', handleMouseUp);
     resizeCleanupRef.current = handleMouseUp;
   }, []);
+
+  const savedNoteContent = currentNote?.content || '';
+  const hasUnsavedNoteChanges = noteContent !== savedNoteContent;
+
+  const backgroundSaveNote = useCallback(() => {
+    const currentClassId = classIdRef.current;
+    if (!currentClassId) return;
+
+    const latestContent = noteContentRef.current;
+    const storedContent = currentNoteContentRef.current;
+    if (latestContent === storedContent) return;
+
+    void persistNote(latestContent, { background: true });
+  }, [persistNote]);
+
+  const handleRightPanelModeChange = useCallback(async (nextMode: RightPanelMode | null) => {
+    if (nextMode === rightPanelMode) {
+      if (rightPanelMode === 'notes' && hasUnsavedNoteChanges) {
+        const saved = await persistNote(noteContent);
+        if (!saved) return;
+      }
+
+      setRightPanelMode(null);
+      return;
+    }
+
+    if (rightPanelMode === 'notes' && nextMode !== 'notes' && hasUnsavedNoteChanges) {
+      const saved = await persistNote(noteContent);
+      if (!saved) return;
+    }
+
+    setRightPanelMode(nextMode);
+  }, [hasUnsavedNoteChanges, noteContent, persistNote, rightPanelMode]);
+
+  const handleSaveNote = useCallback(async () => {
+    await persistNote(noteContent);
+  }, [noteContent, persistNote]);
+
+  useEffect(() => {
+    const handlePageHide = (event?: PageTransitionEvent | Event) => {
+      if (event?.type === 'visibilitychange' && document.visibilityState !== 'hidden') {
+        return;
+      }
+
+      backgroundSaveNote();
+    };
+
+    window.addEventListener('pagehide', handlePageHide);
+    document.addEventListener('visibilitychange', handlePageHide);
+
+    return () => {
+      handlePageHide();
+      window.removeEventListener('pagehide', handlePageHide);
+      document.removeEventListener('visibilitychange', handlePageHide);
+    };
+  }, [backgroundSaveNote]);
 
   if (auth.loading || loading) {
     return (
@@ -409,6 +654,8 @@ export default function BookViewerPage() {
       },
     ])
   );
+  const notesPanelOpen = rightPanelMode === 'notes';
+  const aiPanelOpen = rightPanelMode === 'ask-ai';
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(246,243,237,0.94),rgba(240,236,229,0.98))] text-stone-900">
@@ -455,8 +702,29 @@ export default function BookViewerPage() {
             <div className="flex items-center gap-3">
               <button
                 type="button"
-                onClick={() => setAiPanelOpen((current) => !current)}
-                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-stone-200 bg-white/80 px-3 text-sm font-medium text-stone-700 shadow-[0_12px_30px_rgba(28,25,23,0.08)] transition hover:border-stone-300 hover:bg-white"
+                onClick={() => {
+                  void handleRightPanelModeChange('notes');
+                }}
+                className={`inline-flex h-11 items-center gap-2 rounded-2xl border px-3 text-sm font-medium shadow-[0_12px_30px_rgba(28,25,23,0.08)] transition ${notesPanelOpen ? 'border-stone-900 bg-stone-900 text-stone-50' : 'border-stone-200 bg-white/80 text-stone-700 hover:border-stone-300 hover:bg-white'}`}
+                aria-label={notesPanelOpen ? 'Close Notes panel' : 'Open Notes panel'}
+                title={notesPanelOpen ? 'Close Notes panel' : 'Open Notes panel'}
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.9}
+                    d="M7.75 4.75h7.5A1.75 1.75 0 0 1 17 6.5v11a1.75 1.75 0 0 1-1.75 1.75h-7.5A1.75 1.75 0 0 1 6 17.5v-11a1.75 1.75 0 0 1 1.75-1.75ZM9 8.25h6M9 12h6M9 15.75h3.5"
+                  />
+                </svg>
+                <span className="hidden sm:inline">Notes</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void handleRightPanelModeChange('ask-ai');
+                }}
+                className={`inline-flex h-11 items-center gap-2 rounded-2xl border px-3 text-sm font-medium shadow-[0_12px_30px_rgba(28,25,23,0.08)] transition ${aiPanelOpen ? 'border-stone-900 bg-stone-900 text-stone-50' : 'border-stone-200 bg-white/80 text-stone-700 hover:border-stone-300 hover:bg-white'}`}
                 aria-label={aiPanelOpen ? 'Close Ask AI panel' : 'Open Ask AI panel'}
                 title={aiPanelOpen ? 'Close Ask AI panel' : 'Open Ask AI panel'}
               >
@@ -493,12 +761,14 @@ export default function BookViewerPage() {
           />
         )}
 
-        {aiPanelOpen && (
+        {rightPanelMode !== null && (
           <button
             type="button"
             className="absolute inset-0 z-10 bg-stone-950/20 backdrop-blur-[1px] md:hidden"
-            onClick={() => setAiPanelOpen(false)}
-            aria-label="Close Ask AI panel"
+            onClick={() => {
+              void handleRightPanelModeChange(null);
+            }}
+            aria-label="Close right panel"
           />
         )}
 
@@ -671,8 +941,32 @@ export default function BookViewerPage() {
           open={aiPanelOpen}
           desktopWidth={aiPanelWidth}
           resizing={isAiPanelResizing}
-          onClose={() => setAiPanelOpen(false)}
+          onClose={() => {
+            void handleRightPanelModeChange(null);
+          }}
           onJumpToPage={jumpToPage}
+          onResizeStart={handleAiPanelResizeStart}
+        />
+
+        <BookNotesPanel
+          open={notesPanelOpen}
+          desktopWidth={aiPanelWidth}
+          resizing={isAiPanelResizing}
+          loading={notesLoading}
+          noteContent={noteContent}
+          saving={savingNote}
+          error={noteError}
+          lastUpdated={currentNote?.updated_at ?? null}
+          onClose={() => {
+            void handleRightPanelModeChange(null);
+          }}
+          onChange={(value) => {
+            setNoteContent(value);
+            if (noteError) setNoteError(null);
+          }}
+          onSave={() => {
+            void handleSaveNote();
+          }}
           onResizeStart={handleAiPanelResizeStart}
         />
       </div>

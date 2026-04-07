@@ -2,6 +2,9 @@ import { DeleteObjectCommand, GetObjectCommand, S3Client } from '@aws-sdk/client
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { deleteContentEmbeddings } from '@/lib/qdrant';
+
+export const runtime = 'nodejs';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -118,13 +121,19 @@ export async function DELETE(
 
     const { data: recording, error: recordingError } = await supabase
       .from('recordings')
-      .select('id, storage_path')
+      .select('id, class_id, storage_path')
       .eq('id', recordingId)
       .single();
 
     if (recordingError || !recording) {
       return NextResponse.json({ error: 'Recording not found' }, { status: 404 });
     }
+
+    await deleteContentEmbeddings({
+      classId: recording.class_id,
+      contentType: 'video',
+      sourceId: recording.id,
+    });
 
     if (recording.storage_path) {
       const command = new DeleteObjectCommand({

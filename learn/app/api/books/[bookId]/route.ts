@@ -2,6 +2,9 @@ import { S3Client, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { deleteContentEmbeddings } from '@/lib/qdrant';
+
+export const runtime = 'nodejs';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -117,13 +120,19 @@ export async function DELETE(
 
     const { data: book, error: bookError } = await supabase
       .from('books')
-      .select('id, storage_path')
+      .select('id, class_id, storage_path')
       .eq('id', bookId)
       .single();
 
     if (bookError || !book) {
       return NextResponse.json({ error: 'Book not found' }, { status: 404 });
     }
+
+    await deleteContentEmbeddings({
+      classId: book.class_id,
+      contentType: 'pdf',
+      sourceId: book.id,
+    });
 
     if (book.storage_path) {
       const command = new DeleteObjectCommand({
