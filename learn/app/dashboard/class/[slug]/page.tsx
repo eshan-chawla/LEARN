@@ -737,12 +737,26 @@ export default function ClassPage() {
       setMemberError(null);
       setTransferOwnershipError(null);
 
-      const { error } = await supabase.rpc('transfer_class_ownership', {
-        target_class_id: classData.id,
-        target_user_id: transferOwnershipTarget.user_id,
+      const token = accessTokenRef.current;
+      if (!token) {
+        throw new Error('No authentication token');
+      }
+
+      const response = await fetch(`/api/classes/${classData.id}/transfer-ownership`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          targetUserId: transferOwnershipTarget.user_id,
+        }),
       });
 
-      if (error) throw error;
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(errorData?.error || 'Failed to transfer ownership');
+      }
 
       setClassData((currentClass) => (
         currentClass ? { ...currentClass, user_id: transferOwnershipTarget.user_id } : currentClass

@@ -1,5 +1,6 @@
 'use client';
 
+import { BookAskAIPanel } from '@/components/BookAskAIPanel';
 import { ProfileMenu } from '@/components/ProfileMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
@@ -66,7 +67,9 @@ export default function BookViewerPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewerUrl, setViewerUrl] = useState('');
+  const [viewerBaseUrl, setViewerBaseUrl] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [aiPanelOpen, setAiPanelOpen] = useState(false);
   const [sidebarLoading, setSidebarLoading] = useState(true);
   const [bookSections, setBookSections] = useState<BookSectionData[]>([]);
   const [sidebarBooks, setSidebarBooks] = useState<SidebarBookData[]>([]);
@@ -169,11 +172,14 @@ export default function BookViewerPage() {
       const proxyUrl = `/api/proxy-pdf?url=${encodeURIComponent(data.pdfUrl)}`;
       const encodedProxyUrl = encodeURIComponent(proxyUrl);
       const pageParam = searchParams?.get('page');
+      const nextViewerBaseUrl = `/pdfjs/web/viewer.html?file=${encodedProxyUrl}`;
+
+      setViewerBaseUrl(nextViewerBaseUrl);
 
       if (pageParam) {
-        setViewerUrl(`/pdfjs/web/viewer.html?file=${encodedProxyUrl}#page=${pageParam}`);
+        setViewerUrl(`${nextViewerBaseUrl}#page=${pageParam}`);
       } else {
-        setViewerUrl(`/pdfjs/web/viewer.html?file=${encodedProxyUrl}`);
+        setViewerUrl(nextViewerBaseUrl);
       }
 
       setLoading(false);
@@ -204,6 +210,11 @@ export default function BookViewerPage() {
       [sectionKey]: !current[sectionKey],
     }));
   };
+
+  const jumpToPage = useCallback((pageNumber: number) => {
+    if (!viewerBaseUrl || !Number.isFinite(pageNumber) || pageNumber < 1) return;
+    setViewerUrl(`${viewerBaseUrl}#page=${Math.trunc(pageNumber)}`);
+  }, [viewerBaseUrl]);
 
   if (auth.loading || loading) {
     return (
@@ -299,11 +310,27 @@ export default function BookViewerPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden rounded-full border border-stone-200 bg-white/75 px-3 py-2 text-xs font-medium text-stone-600 shadow-[0_12px_30px_rgba(28,25,23,0.06)] md:inline-flex">
-              Browse modules from the left rail
+          <div className="flex items-center">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setAiPanelOpen((current) => !current)}
+                className="inline-flex h-11 items-center gap-2 rounded-2xl border border-stone-200 bg-white/80 px-3 text-sm font-medium text-stone-700 shadow-[0_12px_30px_rgba(28,25,23,0.08)] transition hover:border-stone-300 hover:bg-white"
+                aria-label={aiPanelOpen ? 'Close Ask AI panel' : 'Open Ask AI panel'}
+                title={aiPanelOpen ? 'Close Ask AI panel' : 'Open Ask AI panel'}
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.9}
+                    d="M12 3l1.9 5.85h6.15l-4.98 3.62 1.9 5.85L12 14.7 7.03 18.32l1.9-5.85L3.95 8.85H10.1L12 3z"
+                  />
+                </svg>
+                <span className="hidden sm:inline">Ask AI</span>
+              </button>
+              <ProfileMenu />
             </div>
-            <ProfileMenu />
           </div>
         </div>
       </header>
@@ -315,6 +342,15 @@ export default function BookViewerPage() {
             className="absolute inset-0 z-10 bg-stone-950/20 backdrop-blur-[1px] md:hidden"
             onClick={() => setSidebarOpen(false)}
             aria-label="Close navigator"
+          />
+        )}
+
+        {aiPanelOpen && (
+          <button
+            type="button"
+            className="absolute inset-0 z-10 bg-stone-950/20 backdrop-blur-[1px] md:hidden"
+            onClick={() => setAiPanelOpen(false)}
+            aria-label="Close Ask AI panel"
           />
         )}
 
@@ -478,6 +514,15 @@ export default function BookViewerPage() {
             )}
           </div>
         </div>
+
+        <BookAskAIPanel
+          bookId={bookId}
+          classId={bookResponse.book.class_id}
+          bookTitle={bookResponse.book.title}
+          open={aiPanelOpen}
+          onClose={() => setAiPanelOpen(false)}
+          onJumpToPage={jumpToPage}
+        />
       </div>
     </div>
   );

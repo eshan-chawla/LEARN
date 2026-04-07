@@ -60,6 +60,11 @@ Fill in your credentials:
 # Supabase Configuration
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+
+# Gemini Configuration (for Ask AI on Vercel)
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_CHAT_MODEL=gemini-2.5-flash-lite
 
 # Modal Configuration (for PDF processing)
 MODAL_WEBHOOK_URL=your-modal-webhook-url
