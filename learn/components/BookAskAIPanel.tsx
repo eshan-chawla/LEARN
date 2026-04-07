@@ -1,14 +1,19 @@
 'use client';
 
 import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 
 type ChatRole = 'user' | 'assistant';
+type AskAiResourceScope = 'currentBook' | 'entireModule' | 'entireClassModules' | 'entireClassContent';
 
 interface ChatSource {
   pageNumber: number | null;
   excerpt: string;
   score: number;
+  sourceId: string;
+  contentType: 'pdf' | 'video';
+  title: string | null;
 }
 
 interface ChatMessage {
@@ -18,10 +23,25 @@ interface ChatMessage {
   sources?: ChatSource[];
 }
 
+interface ResourceScopeState {
+  entireModule: boolean;
+  entireClassModules: boolean;
+  entireClassContent: boolean;
+}
+
+interface PdfSourceMeta {
+  title: string;
+  moduleTitle: string | null;
+}
+
 interface BookAskAIPanelProps {
   bookId: string;
   classId: string;
+  classSlug: string;
   bookTitle: string;
+  moduleBookIds: string[];
+  pdfSourceMeta: Record<string, PdfSourceMeta>;
+  hasModuleScope: boolean;
   open: boolean;
   desktopWidth: number;
   resizing: boolean;
@@ -39,14 +59,112 @@ function createMessage(role: ChatRole, content: string, sources?: ChatSource[]):
   };
 }
 
+function createWelcomeMessage(bookTitle: string) {
+  return createMessage(
+    'assistant',
+    `Ask about ${bookTitle}. I will answer from the selected resources and point you to relevant sources when I can.`
+  );
+}
+
 function formatSimilarityScore(score: number): string {
   return Number.isFinite(score) ? `${Math.round(score * 100)}%` : 'N/A';
+}
+
+function getScopeSummary(
+  hasModuleScope: boolean,
+  resourceScopes: Record<Exclude<AskAiResourceScope, 'currentBook'>, boolean>
+) {
+  if (resourceScopes.entireClassContent) return 'Current book + class content';
+  if (resourceScopes.entireClassModules) return 'Current book + class modules';
+  if (resourceScopes.entireModule && hasModuleScope) return 'Current book + module';
+  return 'Current book';
+}
+
+function normalizeResourceScopeState(value: unknown): ResourceScopeState {
+  if (!value || typeof value !== 'object') {
+    return {
+      entireModule: false,
+      entireClassModules: false,
+      entireClassContent: false,
+    };
+  }
+
+  return {
+    entireModule: Boolean((value as { entireModule?: unknown }).entireModule),
+    entireClassModules: Boolean((value as { entireClassModules?: unknown }).entireClassModules),
+    entireClassContent: Boolean((value as { entireClassContent?: unknown }).entireClassContent),
+  };
+}
+
+function normalizeMessages(value: unknown, bookTitle: string): ChatMessage[] {
+  if (!Array.isArray(value)) {
+    return [createWelcomeMessage(bookTitle)];
+  }
+
+  const normalized = value
+    .map((message) => {
+      if (!message || typeof message !== 'object') return null;
+
+      const role = (message as { role?: unknown }).role;
+      const content = (message as { content?: unknown }).content;
+      const rawSources = (message as { sources?: unknown }).sources;
+
+      if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string' || !content.trim()) {
+        return null;
+      }
+
+      const sources = Array.isArray(rawSources)
+        ? rawSources
+            .map((source) => {
+              if (!source || typeof source !== 'object') return null;
+
+              const contentType =
+                (source as { contentType?: unknown }).contentType === 'video' ? 'video' : 'pdf';
+
+              return {
+                pageNumber: typeof (source as { pageNumber?: unknown }).pageNumber === 'number'
+                  ? (source as { pageNumber: number }).pageNumber
+                  : null,
+                excerpt: typeof (source as { excerpt?: unknown }).excerpt === 'string'
+                  ? (source as { excerpt: string }).excerpt
+                  : '',
+                score: typeof (source as { score?: unknown }).score === 'number'
+                  ? (source as { score: number }).score
+                  : 0,
+                sourceId: typeof (source as { sourceId?: unknown }).sourceId === 'string'
+                  ? (source as { sourceId: string }).sourceId
+                  : '',
+                contentType,
+                title: typeof (source as { title?: unknown }).title === 'string'
+                  ? (source as { title: string }).title
+                  : null,
+              } satisfies ChatSource;
+            })
+            .filter((source): source is ChatSource => source !== null)
+        : undefined;
+
+      return {
+        id: typeof (message as { id?: unknown }).id === 'string'
+          ? (message as { id: string }).id
+          : `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        role,
+        content,
+        sources,
+      } satisfies ChatMessage;
+    })
+    .filter((message): message is ChatMessage => message !== null);
+
+  return normalized.length > 0 ? normalized : [createWelcomeMessage(bookTitle)];
 }
 
 export function BookAskAIPanel({
   bookId,
   classId,
+  classSlug,
   bookTitle,
+  moduleBookIds,
+  pdfSourceMeta,
+  hasModuleScope,
   open,
   desktopWidth,
   resizing,
@@ -54,40 +172,130 @@ export function BookAskAIPanel({
   onJumpToPage,
   onResizeStart,
 }: BookAskAIPanelProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    createMessage(
-      'assistant',
-      `Ask about ${bookTitle}. I will answer from this book's indexed passages and point you to relevant pages when I can.`
-    ),
-  ]);
+  const router = useRouter();
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [createWelcomeMessage(bookTitle)]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
+  const [resourceScopes, setResourceScopes] = useState<ResourceScopeState>({
+    entireModule: false,
+    entireClassModules: false,
+    entireClassContent: false,
+  });
+  const [historyReady, setHistoryReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const resourceMenuRef = useRef<HTMLDivElement | null>(null);
+  const storageKey = `smart-learn-book-ask-ai-session:${classSlug}`;
+
+  const selectedScopeSummary = getScopeSummary(hasModuleScope, resourceScopes);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages, sending]);
 
   useEffect(() => {
-    setMessages([
-      createMessage(
-        'assistant',
-        `Ask about ${bookTitle}. I will answer from this book's indexed passages and point you to relevant pages when I can.`
-      ),
-    ]);
+    if (typeof window === 'undefined') return;
+
     setExpandedSources({});
-    setInput('');
     setError(null);
-  }, [bookId, bookTitle]);
+    setResourceMenuOpen(false);
+
+    const storedValue = window.sessionStorage.getItem(storageKey);
+
+    if (!storedValue) {
+      setMessages([createWelcomeMessage(bookTitle)]);
+      setInput('');
+      setResourceScopes({
+        entireModule: false,
+        entireClassModules: false,
+        entireClassContent: false,
+      });
+      setHistoryReady(true);
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(storedValue) as {
+        messages?: unknown;
+        input?: unknown;
+        resourceScopes?: unknown;
+      };
+
+      setMessages(normalizeMessages(parsed.messages, bookTitle));
+      setInput(typeof parsed.input === 'string' ? parsed.input : '');
+      setResourceScopes(normalizeResourceScopeState(parsed.resourceScopes));
+    } catch {
+      setMessages([createWelcomeMessage(bookTitle)]);
+      setInput('');
+      setResourceScopes({
+        entireModule: false,
+        entireClassModules: false,
+        entireClassContent: false,
+      });
+    } finally {
+      setHistoryReady(true);
+    }
+  }, [bookTitle, storageKey]);
+
+  useEffect(() => {
+    if (!historyReady || typeof window === 'undefined') return;
+
+    window.sessionStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        messages,
+        input,
+        resourceScopes,
+      })
+    );
+  }, [historyReady, input, messages, resourceScopes, storageKey]);
+
+  useEffect(() => {
+    if (!historyReady) return;
+
+    setResourceScopes((current) => {
+      if (hasModuleScope || !current.entireModule) {
+        return current;
+      }
+
+      return {
+        ...current,
+        entireModule: false,
+      };
+    });
+  }, [hasModuleScope, historyReady]);
 
   useEffect(() => {
     if (open) {
       textareaRef.current?.focus();
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!resourceMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (resourceMenuRef.current?.contains(event.target as Node)) return;
+      setResourceMenuOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setResourceMenuOpen(false);
+      }
+    };
+
+    window.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [resourceMenuOpen]);
 
   const handleSubmit = async () => {
     const question = input.trim();
@@ -119,6 +327,13 @@ export function BookAskAIPanel({
         body: JSON.stringify({
           classId,
           bookTitle,
+          moduleBookIds,
+          resourceScopes: [
+            'currentBook',
+            ...(hasModuleScope && resourceScopes.entireModule ? (['entireModule'] as const) : []),
+            ...(resourceScopes.entireClassModules ? (['entireClassModules'] as const) : []),
+            ...(resourceScopes.entireClassContent ? (['entireClassContent'] as const) : []),
+          ],
           messages: nextMessages.map((message) => ({
             role: message.role,
             content: message.content,
@@ -159,6 +374,39 @@ export function BookAskAIPanel({
     '--ask-ai-width': `${desktopWidth}px`,
   } as CSSProperties;
 
+  const getPdfSourceLabel = (source: ChatSource) => {
+    const metadata = pdfSourceMeta[source.sourceId];
+    const sourceTitle = metadata?.title || source.title || 'Book source';
+
+    if (metadata?.moduleTitle) {
+      return `${metadata.moduleTitle} · ${sourceTitle}`;
+    }
+
+    return sourceTitle;
+  };
+
+  const handleSourceClick = (source: ChatSource) => {
+    if (source.contentType !== 'pdf') {
+      return;
+    }
+
+    if (source.sourceId === bookId) {
+      if (source.pageNumber) {
+        onJumpToPage(source.pageNumber);
+      }
+      return;
+    }
+
+    const nextParams = new URLSearchParams();
+    nextParams.set('ask-ai', 'open');
+
+    if (source.pageNumber) {
+      nextParams.set('page', String(source.pageNumber));
+    }
+
+    router.push(`/dashboard/class/${classSlug}/book/${source.sourceId}?${nextParams.toString()}`);
+  };
+
   return (
     <aside
       style={panelStyle}
@@ -180,9 +428,99 @@ export function BookAskAIPanel({
       <div className="flex items-center justify-between gap-3 border-b border-stone-200/80 px-4 py-4">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">Ask AI</p>
-          <p className="mt-2 text-sm leading-6 text-stone-600">
-            Grounded answers from this book only.
-          </p>
+          <div ref={resourceMenuRef} className="relative mt-2">
+            <button
+              type="button"
+              onClick={() => setResourceMenuOpen((current) => !current)}
+              className="flex min-w-[13.5rem] items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white/85 px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-white"
+              aria-haspopup="menu"
+              aria-expanded={resourceMenuOpen}
+            >
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">Resources</p>
+                <p className="mt-1 truncate text-sm text-stone-600">{selectedScopeSummary}</p>
+              </div>
+              <svg
+                className={`h-4 w-4 flex-shrink-0 text-stone-500 transition-transform ${resourceMenuOpen ? 'rotate-180' : 'rotate-0'}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+
+            {resourceMenuOpen && (
+              <div className="absolute left-0 top-full z-30 mt-2 w-[18rem] rounded-[24px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-2 shadow-[0_24px_60px_rgba(28,25,23,0.16)]">
+                <div className="space-y-1">
+                  <div className="flex items-start gap-3 rounded-2xl px-3 py-2.5">
+                    <span className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border border-stone-900 bg-stone-900 text-white">
+                      <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M5 13l4 4L19 7" />
+                      </svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-stone-800">Current book</p>
+                      <p className="mt-0.5 text-xs leading-5 text-stone-500">Always included for the page you are reading.</p>
+                    </div>
+                  </div>
+
+                  {([
+                    {
+                      key: 'entireModule',
+                      label: 'Entire module',
+                      description: hasModuleScope
+                        ? 'Search across the other books in this module too.'
+                        : 'Unavailable because this book is not inside a module.',
+                      disabled: !hasModuleScope,
+                    },
+                    {
+                      key: 'entireClassModules',
+                      label: 'Entire class modules',
+                      description: 'Search across the class book library.',
+                      disabled: false,
+                    },
+                    {
+                      key: 'entireClassContent',
+                      label: 'Entire class content',
+                      description: 'Search across books and any indexed class recordings.',
+                      disabled: false,
+                    },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      disabled={option.disabled}
+                      onClick={() => {
+                        if (option.disabled) return;
+                        setResourceScopes((current) => ({
+                          ...current,
+                          [option.key]: !current[option.key],
+                        }));
+                      }}
+                      className="flex w-full items-start gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-stone-100/80 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <span
+                        className={`mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border transition ${
+                          resourceScopes[option.key]
+                            ? 'border-stone-900 bg-stone-900 text-white'
+                            : 'border-stone-300 bg-white text-transparent'
+                        }`}
+                      >
+                        <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-stone-800">{option.label}</p>
+                        <p className="mt-0.5 text-xs leading-5 text-stone-500">{option.description}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         <button
           type="button"
@@ -246,38 +584,59 @@ export function BookAskAIPanel({
                   <div className={`grid transition-[grid-template-rows] duration-300 ${(expandedSources[message.id] ?? false) ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                     <div className="overflow-hidden">
                       <div className="space-y-2 pt-1">
-                        {message.sources.map((source, index) => (
-                          <div key={`${message.id}-${index}`} className="group relative">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (source.pageNumber) {
-                                  onJumpToPage(source.pageNumber);
-                                }
-                              }}
-                              className="w-full rounded-2xl border border-stone-200 bg-stone-50/80 px-3 py-3 text-left transition hover:border-stone-300 hover:bg-white disabled:cursor-default"
-                              disabled={!source.pageNumber}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="space-y-1">
-                                  <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                                    {source.pageNumber ? `Page ${source.pageNumber}` : 'Page unavailable'}
-                                  </span>
-                                  <span className="block text-[11px] font-medium text-stone-400">
-                                    Similarity {formatSimilarityScore(source.score)}
+                        {message.sources.map((source, index) => {
+                          const canInteractWithSource =
+                            source.contentType === 'pdf' &&
+                            (source.sourceId !== bookId || source.pageNumber !== null);
+
+                          return (
+                            <div key={`${message.id}-${index}`} className="group relative">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (canInteractWithSource) {
+                                    handleSourceClick(source);
+                                  }
+                                }}
+                                className="w-full rounded-2xl border border-stone-200 bg-stone-50/80 px-3 py-3 text-left transition hover:border-stone-300 hover:bg-white disabled:cursor-default"
+                                disabled={!canInteractWithSource}
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="space-y-1">
+                                    <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
+                                      {source.pageNumber
+                                        ? `Page ${source.pageNumber}`
+                                        : source.contentType === 'video'
+                                          ? 'Transcript excerpt'
+                                          : 'Page unavailable'}
+                                    </span>
+                                    <span className="block truncate text-sm font-medium text-stone-700">
+                                      {source.contentType === 'pdf'
+                                        ? getPdfSourceLabel(source)
+                                        : source.title || 'Class recording'}
+                                    </span>
+                                    <span className="block text-[11px] font-medium text-stone-400">
+                                      Similarity {formatSimilarityScore(source.score)}
+                                    </span>
+                                  </div>
+                                  <span className="pt-0.5 text-xs font-medium text-stone-400">
+                                    {source.contentType !== 'pdf'
+                                      ? 'Preview only'
+                                      : source.sourceId !== bookId
+                                        ? 'Open source'
+                                        : source.pageNumber
+                                          ? 'Jump to page'
+                                          : 'Preview only'}
                                   </span>
                                 </div>
-                                <span className="pt-0.5 text-xs font-medium text-stone-400">
-                                  {source.pageNumber ? 'Hover to preview' : 'No page link'}
-                                </span>
-                              </div>
-                            </button>
+                              </button>
 
-                            <div className="pointer-events-none absolute left-3 right-3 top-full z-20 mt-2 hidden rounded-[20px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-4 text-sm leading-6 text-stone-600 opacity-0 shadow-[0_24px_60px_rgba(28,25,23,0.14)] transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100 md:block">
-                              {source.excerpt}
+                              <div className="pointer-events-none absolute left-3 right-3 top-full z-20 mt-2 hidden rounded-[20px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-4 text-sm leading-6 text-stone-600 opacity-0 shadow-[0_24px_60px_rgba(28,25,23,0.14)] transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100 md:block">
+                                {source.excerpt}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -288,13 +647,13 @@ export function BookAskAIPanel({
 
           {sending && (
             <div className="mr-4 rounded-[24px] border border-stone-200 bg-white/85 px-4 py-3 text-sm text-stone-600 shadow-[0_12px_30px_rgba(28,25,23,0.06)]">
-              Thinking with the current book...
+              Thinking with the selected resources...
             </div>
           )}
 
           {!sending && messages.length === 1 && (
             <div className="rounded-[24px] border border-dashed border-stone-200 bg-white/65 px-4 py-5 text-sm leading-6 text-stone-500">
-              Try asking for a definition, a summary of a concept, or where a topic is discussed in the current book.
+              Try asking for a definition, a summary of a concept, or where a topic is discussed in the selected resources.
             </div>
           )}
 
@@ -328,7 +687,7 @@ export function BookAskAIPanel({
 
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs leading-5 text-stone-500">
-              Answers are grounded in retrieved passages from this book.
+              Answers are grounded in retrieved passages from {selectedScopeSummary.toLowerCase()}.
             </p>
             <button
               type="submit"

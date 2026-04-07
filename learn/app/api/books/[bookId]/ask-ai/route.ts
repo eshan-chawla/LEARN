@@ -4,6 +4,7 @@ export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 type ChatRole = 'user' | 'assistant';
+type ResourceScope = 'currentBook' | 'entireModule' | 'entireClassModules' | 'entireClassContent';
 
 interface ChatMessage {
   role: ChatRole;
@@ -13,6 +14,8 @@ interface ChatMessage {
 interface RetrievalHit {
   score: number;
   text: string;
+  sourceId: string;
+  contentType: 'pdf' | 'video';
   title: string | null;
   pageNumber: number | null;
   pageChunkIndex: number | null;
@@ -70,6 +73,33 @@ function normalizeMessages(value: unknown): ChatMessage[] {
   return normalized.slice(-8);
 }
 
+function normalizeStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean);
+}
+
+function normalizeResourceScopes(value: unknown): Set<ResourceScope> {
+  const scopes = new Set<ResourceScope>(['currentBook']);
+
+  for (const candidate of normalizeStringList(value)) {
+    if (
+      candidate === 'currentBook' ||
+      candidate === 'entireModule' ||
+      candidate === 'entireClassModules' ||
+      candidate === 'entireClassContent'
+    ) {
+      scopes.add(candidate);
+    }
+  }
+
+  return scopes;
+}
+
 function summarizeConversation(messages: ChatMessage[]) {
   return messages
     .slice(-6)
@@ -80,11 +110,16 @@ function summarizeConversation(messages: ChatMessage[]) {
 function buildContext(hits: RetrievalHit[], bookTitle: string) {
   return hits
     .map((hit, index) => {
-      const pageLabel = hit.pageNumber ? `Page ${hit.pageNumber}` : 'Page unavailable';
+      const locatorLabel = hit.pageNumber
+        ? `Page ${hit.pageNumber}`
+        : hit.contentType === 'video'
+          ? 'Transcript excerpt'
+          : 'Page unavailable';
       return [
         `Excerpt ${index + 1}`,
-        `Book: ${hit.title || bookTitle}`,
-        pageLabel,
+        `Source type: ${hit.contentType === 'video' ? 'Class recording transcript' : 'Book passage'}`,
+        `Source title: ${hit.title || bookTitle}`,
+        `Location: ${locatorLabel}`,
         hit.text,
       ].join('\n');
     })
@@ -96,7 +131,12 @@ function buildSources(hits: RetrievalHit[]) {
 
   return hits
     .filter((hit) => {
-      const key = `${hit.pageNumber ?? 'none'}:${hit.pageChunkIndex ?? hit.chunkIndex ?? 'none'}`;
+      const key = [
+        hit.contentType,
+        hit.sourceId,
+        hit.pageNumber ?? 'none',
+        hit.pageChunkIndex ?? hit.chunkIndex ?? 'none',
+      ].join(':');
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -106,7 +146,75 @@ function buildSources(hits: RetrievalHit[]) {
       pageNumber: hit.pageNumber,
       excerpt: hit.text.length > 240 ? `${hit.text.slice(0, 237).trimEnd()}...` : hit.text,
       score: hit.score,
+      sourceId: hit.sourceId,
+      contentType: hit.contentType,
+      title: hit.title,
     }));
+}
+
+function describeResourceScope(scopes: Set<ResourceScope>, bookTitle: string) {
+  if (scopes.has('entireClassContent')) {
+    return 'the entire class content, including books and indexed recordings';
+  }
+
+  if (scopes.has('entireClassModules')) {
+    return 'the class book library across all modules';
+  }
+
+  if (scopes.has('entireModule')) {
+    return `the current module around ${bookTitle}`;
+  }
+
+  return `the current book, ${bookTitle}`;
+}
+
+function buildRetrievalTarget(
+  request: NextRequest,
+  classId: string,
+  bookId: string,
+  scopes: Set<ResourceScope>,
+  moduleBookIds: string[],
+  query: string
+) {
+  if (scopes.has('entireClassContent')) {
+    return {
+      url: new URL(`/api/retrieval/class/${classId}`, request.nextUrl.origin),
+      body: {
+        query,
+        limit: 8,
+      },
+    };
+  }
+
+  if (scopes.has('entireClassModules')) {
+    return {
+      url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
+      body: {
+        query,
+        limit: 8,
+      },
+    };
+  }
+
+  if (scopes.has('entireModule')) {
+    return {
+      url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
+      body: {
+        query,
+        sourceIds: Array.from(new Set([bookId, ...moduleBookIds])),
+        limit: 6,
+      },
+    };
+  }
+
+  return {
+    url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
+    body: {
+      query,
+      sourceIds: [bookId],
+      limit: 6,
+    },
+  };
 }
 
 async function callGemini(prompt: string) {
@@ -184,28 +292,31 @@ export async function POST(
     const classId = typeof body.classId === 'string' ? body.classId.trim() : '';
     const bookTitle = typeof body.bookTitle === 'string' ? body.bookTitle.trim() : 'Current book';
     const messages = normalizeMessages(body.messages);
+    const resourceScopes = normalizeResourceScopes(body.resourceScopes);
+    const moduleBookIds = normalizeStringList(body.moduleBookIds);
 
     if (!classId) {
       return NextResponse.json({ error: 'Missing required field: classId' }, { status: 400 });
     }
 
     const latestUserMessage = messages[messages.length - 1];
-    const retrievalResponse = await fetch(
-      new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: authHeader,
-        },
-        body: JSON.stringify({
-          query: latestUserMessage.content,
-          sourceIds: [bookId],
-          limit: 6,
-        }),
-        cache: 'no-store',
-      }
+    const retrievalTarget = buildRetrievalTarget(
+      request,
+      classId,
+      bookId,
+      resourceScopes,
+      moduleBookIds,
+      latestUserMessage.content
     );
+    const retrievalResponse = await fetch(retrievalTarget.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: authHeader,
+      },
+      body: JSON.stringify(retrievalTarget.body),
+      cache: 'no-store',
+    });
 
     const retrievalPayload = await retrievalResponse.json().catch(() => null) as
       | { hits?: RetrievalHit[]; error?: string }
@@ -222,23 +333,26 @@ export async function POST(
     if (hits.length === 0) {
       return NextResponse.json({
         answer:
-          'I could not find matching passages in this book for that question. Try asking with a more specific term, concept, or page reference.',
+          'I could not find matching passages in the selected resources for that question. Try asking with a more specific term, concept, or page reference.',
         sources: [],
       });
     }
 
+    const resourceScopeLabel = describeResourceScope(resourceScopes, bookTitle);
+
     const prompt = [
       'You are Smart Learn AI inside a book reader.',
-      'Answer the student using only the retrieved excerpts from the current book.',
+      'Answer the student using only the retrieved excerpts from the selected resources.',
       'If the excerpts are not sufficient, say that clearly instead of guessing.',
       'Use short paragraphs. Use flat bullets only if they make the answer clearer.',
       '',
-      `Book title: ${bookTitle}`,
+      `Current book title: ${bookTitle}`,
+      `Resource scope: ${resourceScopeLabel}`,
       '',
       'Recent conversation:',
       summarizeConversation(messages),
       '',
-      'Retrieved excerpts from the current book:',
+      'Retrieved excerpts from the selected resources:',
       buildContext(hits, bookTitle),
       '',
       `Student's latest question: ${latestUserMessage.content}`,

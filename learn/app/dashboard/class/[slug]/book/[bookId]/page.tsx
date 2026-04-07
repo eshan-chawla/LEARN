@@ -59,6 +59,7 @@ const MIN_AI_PANEL_WIDTH = 320;
 const MAX_AI_PANEL_WIDTH = 720;
 const MIN_VIEWER_WIDTH = 420;
 const AI_PANEL_WIDTH_STORAGE_KEY = 'smart-learn-book-ask-ai-width';
+const AI_PANEL_OPEN_STORAGE_KEY_PREFIX = 'smart-learn-book-ask-ai-open';
 
 export default function BookViewerPage() {
   const auth = useAuth();
@@ -105,6 +106,30 @@ export default function BookViewerPage() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(AI_PANEL_WIDTH_STORAGE_KEY, String(aiPanelWidth));
   }, [aiPanelWidth]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !slug) return;
+
+    const shouldOpenFromQuery = searchParams?.get('ask-ai') === 'open';
+    if (shouldOpenFromQuery) {
+      setAiPanelOpen(true);
+      return;
+    }
+
+    const storedValue = window.sessionStorage.getItem(
+      `${AI_PANEL_OPEN_STORAGE_KEY_PREFIX}:${slug}`
+    );
+    setAiPanelOpen(storedValue === 'true');
+  }, [searchParams, slug]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !slug) return;
+
+    window.sessionStorage.setItem(
+      `${AI_PANEL_OPEN_STORAGE_KEY_PREFIX}:${slug}`,
+      aiPanelOpen ? 'true' : 'false'
+    );
+  }, [aiPanelOpen, slug]);
 
   useEffect(() => {
     return () => {
@@ -360,9 +385,30 @@ export default function BookViewerPage() {
       .filter((candidate) => candidate.section_id === section.id)
       .sort((left, right) => left.position - right.position),
   }));
+  const sectionTitleById = Object.fromEntries(
+    bookSections.map((section) => [section.id, section.title])
+  ) as Record<string, string>;
   const unassignedBooks = sidebarBooks
     .filter((candidate) => candidate.section_id === null)
     .sort((left, right) => left.position - right.position);
+  const currentSectionId =
+    sidebarBooks.find((candidate) => candidate.id === bookId)?.section_id ??
+    bookResponse.book.section_id ??
+    null;
+  const currentModuleBookIds = currentSectionId
+    ? sidebarBooks
+        .filter((candidate) => candidate.section_id === currentSectionId)
+        .map((candidate) => candidate.id)
+    : [];
+  const pdfSourceMeta = Object.fromEntries(
+    sidebarBooks.map((candidate) => [
+      candidate.id,
+      {
+        title: candidate.title,
+        moduleTitle: candidate.section_id ? sectionTitleById[candidate.section_id] || null : 'Unassigned',
+      },
+    ])
+  );
 
   return (
     <div className="fixed inset-0 flex flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(246,243,237,0.94),rgba(240,236,229,0.98))] text-stone-900">
@@ -458,9 +504,6 @@ export default function BookViewerPage() {
         >
           <div className="border-b border-stone-200/80 px-4 py-4">
             <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">Modules</p>
-            <p className="mt-2 text-sm leading-6 text-stone-600">
-              Browse the class library from here while keeping the reader in view.
-            </p>
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
@@ -616,7 +659,11 @@ export default function BookViewerPage() {
         <BookAskAIPanel
           bookId={bookId}
           classId={bookResponse.book.class_id}
+          classSlug={slug}
           bookTitle={bookResponse.book.title}
+          moduleBookIds={currentModuleBookIds}
+          pdfSourceMeta={pdfSourceMeta}
+          hasModuleScope={currentSectionId !== null}
           open={aiPanelOpen}
           desktopWidth={aiPanelWidth}
           resizing={isAiPanelResizing}
