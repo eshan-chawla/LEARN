@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 
 type ChatRole = 'user' | 'assistant';
-type AskAiResourceScope = 'currentBook' | 'entireModule' | 'entireClassModules' | 'entireClassContent';
+type AskAiResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos';
 
 interface ChatSource {
   pageNumber: number | null;
@@ -27,8 +27,8 @@ interface ChatMessage {
 
 interface ResourceScopeState {
   entireModule: boolean;
-  entireClassModules: boolean;
-  entireClassContent: boolean;
+  allBooks: boolean;
+  includeVideos: boolean;
 }
 
 interface PdfSourceMeta {
@@ -93,8 +93,12 @@ function getScopeSummary(
   hasModuleScope: boolean,
   resourceScopes: Record<Exclude<AskAiResourceScope, 'currentBook'>, boolean>
 ) {
-  if (resourceScopes.entireClassContent) return 'Current book + class content';
-  if (resourceScopes.entireClassModules) return 'Current book + class modules';
+  if (resourceScopes.allBooks && resourceScopes.includeVideos) return 'Current book + all books + videos';
+  if (resourceScopes.allBooks) return 'Current book + all books';
+  if (resourceScopes.entireModule && resourceScopes.includeVideos && hasModuleScope) {
+    return 'Current book + module + videos';
+  }
+  if (resourceScopes.includeVideos) return 'Current book + videos';
   if (resourceScopes.entireModule && hasModuleScope) return 'Current book + module';
   return 'Current book';
 }
@@ -103,15 +107,21 @@ function normalizeResourceScopeState(value: unknown): ResourceScopeState {
   if (!value || typeof value !== 'object') {
     return {
       entireModule: false,
-      entireClassModules: false,
-      entireClassContent: false,
+      allBooks: false,
+      includeVideos: false,
     };
   }
 
   return {
     entireModule: Boolean((value as { entireModule?: unknown }).entireModule),
-    entireClassModules: Boolean((value as { entireClassModules?: unknown }).entireClassModules),
-    entireClassContent: Boolean((value as { entireClassContent?: unknown }).entireClassContent),
+    allBooks: Boolean(
+      (value as { allBooks?: unknown; entireClassModules?: unknown }).allBooks ??
+        (value as { allBooks?: unknown; entireClassModules?: unknown }).entireClassModules
+    ),
+    includeVideos: Boolean(
+      (value as { includeVideos?: unknown; entireClassContent?: unknown }).includeVideos ??
+        (value as { includeVideos?: unknown; entireClassContent?: unknown }).entireClassContent
+    ),
   };
 }
 
@@ -206,8 +216,8 @@ export function BookAskAIPanel({
   const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
   const [resourceScopes, setResourceScopes] = useState<ResourceScopeState>({
     entireModule: false,
-    entireClassModules: false,
-    entireClassContent: false,
+    allBooks: false,
+    includeVideos: false,
   });
   const [historyReady, setHistoryReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -235,8 +245,8 @@ export function BookAskAIPanel({
       setInput('');
       setResourceScopes({
         entireModule: false,
-        entireClassModules: false,
-        entireClassContent: false,
+        allBooks: false,
+        includeVideos: false,
       });
       setHistoryReady(true);
       return;
@@ -257,8 +267,8 @@ export function BookAskAIPanel({
       setInput('');
       setResourceScopes({
         entireModule: false,
-        entireClassModules: false,
-        entireClassContent: false,
+        allBooks: false,
+        includeVideos: false,
       });
     } finally {
       setHistoryReady(true);
@@ -289,6 +299,7 @@ export function BookAskAIPanel({
       return {
         ...current,
         entireModule: false,
+        allBooks: false,
       };
     });
   }, [hasModuleScope, historyReady]);
@@ -356,8 +367,8 @@ export function BookAskAIPanel({
           resourceScopes: [
             'currentBook',
             ...(hasModuleScope && resourceScopes.entireModule ? (['entireModule'] as const) : []),
-            ...(resourceScopes.entireClassModules ? (['entireClassModules'] as const) : []),
-            ...(resourceScopes.entireClassContent ? (['entireClassContent'] as const) : []),
+            ...(resourceScopes.allBooks ? (['allBooks'] as const) : []),
+            ...(resourceScopes.includeVideos ? (['includeVideos'] as const) : []),
           ],
           messages: nextMessages.map((message) => ({
             role: message.role,
@@ -489,37 +500,25 @@ export function BookAskAIPanel({
             {resourceMenuOpen && (
               <div className="absolute left-0 top-full z-30 mt-2 w-[18rem] rounded-[24px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-2 shadow-[0_24px_60px_rgba(28,25,23,0.16)]">
                 <div className="space-y-1">
-                  <div className="flex items-start gap-3 rounded-2xl px-3 py-2.5">
-                    <span className="mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border border-stone-900 bg-stone-900 text-white">
-                      <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-stone-800">Current book</p>
-                      <p className="mt-0.5 text-xs leading-5 text-stone-500">Always included for the page you are reading.</p>
-                    </div>
-                  </div>
-
                   {([
                     {
                       key: 'entireModule',
-                      label: 'Entire module',
+                      label: 'Include Entire Module',
                       description: hasModuleScope
                         ? 'Search across the other books in this module too.'
                         : 'Unavailable because this book is not inside a module.',
                       disabled: !hasModuleScope,
                     },
                     {
-                      key: 'entireClassModules',
-                      label: 'Entire class modules',
-                      description: 'Search across the class book library.',
+                      key: 'allBooks',
+                      label: 'Include All Books',
+                      description: 'Search across every book in this class.',
                       disabled: false,
                     },
                     {
-                      key: 'entireClassContent',
-                      label: 'Entire class content',
-                      description: 'Search across books and any indexed class recordings.',
+                      key: 'includeVideos',
+                      label: 'Include Videos',
+                      description: 'Add indexed class recordings to the search.',
                       disabled: false,
                     },
                   ] as const).map((option) => (
@@ -529,28 +528,52 @@ export function BookAskAIPanel({
                       disabled={option.disabled}
                       onClick={() => {
                         if (option.disabled) return;
-                        setResourceScopes((current) => ({
-                          ...current,
-                          [option.key]: !current[option.key],
-                        }));
+                        setResourceScopes((current) => {
+                          const nextValue = !current[option.key];
+
+                          if (option.key === 'entireModule') {
+                            return {
+                              ...current,
+                              entireModule: nextValue,
+                              allBooks: hasModuleScope && !nextValue ? false : current.allBooks,
+                            };
+                          }
+
+                          if (option.key === 'allBooks') {
+                            return {
+                              ...current,
+                              allBooks: nextValue,
+                              entireModule:
+                                nextValue && hasModuleScope ? true : current.entireModule,
+                            };
+                          }
+
+                          return {
+                            ...current,
+                            includeVideos: nextValue,
+                          };
+                        });
                       }}
                       className="flex w-full items-start gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-stone-100/80 disabled:cursor-not-allowed disabled:opacity-50"
                     >
-                      <span
-                        className={`mt-0.5 inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border transition ${
-                          resourceScopes[option.key]
-                            ? 'border-stone-900 bg-stone-900 text-white'
-                            : 'border-stone-300 bg-white text-transparent'
-                        }`}
-                      >
-                        <svg className="h-2.5 w-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      </span>
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-stone-800">{option.label}</p>
                         <p className="mt-0.5 text-xs leading-5 text-stone-500">{option.description}</p>
                       </div>
+                      <span
+                        className={`mt-1 inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border px-0.5 transition ${
+                          resourceScopes[option.key]
+                            ? 'border-stone-900 bg-stone-900'
+                            : 'border-stone-300 bg-white'
+                        }`}
+                        aria-hidden="true"
+                      >
+                        <span
+                          className={`h-4 w-4 rounded-full bg-white shadow-[0_2px_6px_rgba(28,25,23,0.16)] transition-transform ${
+                            resourceScopes[option.key] ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </span>
                     </button>
                   ))}
                 </div>

@@ -4,7 +4,7 @@ export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 type ChatRole = 'user' | 'assistant';
-type ResourceScope = 'currentBook' | 'entireModule' | 'entireClassModules' | 'entireClassContent';
+type ResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos';
 
 interface ChatMessage {
   role: ChatRole;
@@ -22,6 +22,15 @@ interface RetrievalHit {
   chunkIndex: number | null;
   startSeconds: number | null;
   endSeconds: number | null;
+}
+
+interface RetrievalTarget {
+  url: URL;
+  body: {
+    query: string;
+    limit: number;
+    sourceIds?: string[];
+  };
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -89,13 +98,18 @@ function normalizeResourceScopes(value: unknown): Set<ResourceScope> {
   const scopes = new Set<ResourceScope>(['currentBook']);
 
   for (const candidate of normalizeStringList(value)) {
-    if (
-      candidate === 'currentBook' ||
-      candidate === 'entireModule' ||
-      candidate === 'entireClassModules' ||
-      candidate === 'entireClassContent'
-    ) {
+    if (candidate === 'currentBook' || candidate === 'entireModule') {
       scopes.add(candidate);
+      continue;
+    }
+
+    if (candidate === 'allBooks' || candidate === 'entireClassModules') {
+      scopes.add('allBooks');
+      continue;
+    }
+
+    if (candidate === 'includeVideos' || candidate === 'entireClassContent') {
+      scopes.add('includeVideos');
     }
   }
 
@@ -176,22 +190,34 @@ function buildSources(hits: RetrievalHit[]) {
 }
 
 function describeResourceScope(scopes: Set<ResourceScope>, bookTitle: string) {
-  if (scopes.has('entireClassContent')) {
-    return 'the entire class content, including books and indexed recordings';
+  const includesAllBooks = scopes.has('allBooks');
+  const includesVideos = scopes.has('includeVideos');
+  const includesEntireModule = scopes.has('entireModule') && !includesAllBooks;
+
+  if (includesAllBooks && includesVideos) {
+    return 'all books in the class plus indexed class recordings';
   }
 
-  if (scopes.has('entireClassModules')) {
-    return 'the class book library across all modules';
+  if (includesAllBooks) {
+    return 'all books in the class';
   }
 
-  if (scopes.has('entireModule')) {
+  if (includesEntireModule && includesVideos) {
+    return `the current module around ${bookTitle} plus indexed class recordings`;
+  }
+
+  if (includesVideos) {
+    return `the current book, ${bookTitle}, plus indexed class recordings`;
+  }
+
+  if (includesEntireModule) {
     return `the current module around ${bookTitle}`;
   }
 
   return `the current book, ${bookTitle}`;
 }
 
-function buildRetrievalTarget(
+function buildRetrievalTargets(
   request: NextRequest,
   classId: string,
   bookId: string,
@@ -199,45 +225,77 @@ function buildRetrievalTarget(
   moduleBookIds: string[],
   query: string
 ) {
-  if (scopes.has('entireClassContent')) {
-    return {
-      url: new URL(`/api/retrieval/class/${classId}`, request.nextUrl.origin),
+  const targets: RetrievalTarget[] = [];
+  const includesAllBooks = scopes.has('allBooks');
+  const includesVideos = scopes.has('includeVideos');
+  const includesEntireModule = scopes.has('entireModule') && moduleBookIds.length > 0 && !includesAllBooks;
+
+  targets.push(
+    includesAllBooks
+      ? {
+          url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
+          body: {
+            query,
+            limit: includesVideos ? 6 : 8,
+          },
+        }
+      : includesEntireModule
+        ? {
+            url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
+            body: {
+              query,
+              sourceIds: Array.from(new Set([bookId, ...moduleBookIds])),
+              limit: includesVideos ? 6 : 8,
+            },
+          }
+        : {
+            url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
+            body: {
+              query,
+              sourceIds: [bookId],
+              limit: includesVideos ? 6 : 8,
+            },
+          }
+  );
+
+  if (includesVideos) {
+    targets.push({
+      url: new URL(`/api/retrieval/class/${classId}/video`, request.nextUrl.origin),
       body: {
         query,
-        limit: 8,
+        limit: 4,
       },
-    };
+    });
   }
 
-  if (scopes.has('entireClassModules')) {
-    return {
-      url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
-      body: {
-        query,
-        limit: 8,
-      },
-    };
-  }
+  return targets;
+}
 
-  if (scopes.has('entireModule')) {
-    return {
-      url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
-      body: {
-        query,
-        sourceIds: Array.from(new Set([bookId, ...moduleBookIds])),
-        limit: 6,
-      },
-    };
-  }
+function mergeRetrievalHits(hitGroups: RetrievalHit[][], limit = 8) {
+  const seen = new Set<string>();
 
-  return {
-    url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
-    body: {
-      query,
-      sourceIds: [bookId],
-      limit: 6,
-    },
-  };
+  return hitGroups
+    .flat()
+    .sort((left, right) => right.score - left.score)
+    .filter((hit) => {
+      const key = [
+        hit.contentType,
+        hit.sourceId,
+        hit.pageNumber ?? 'none',
+        hit.startSeconds ?? 'none',
+        hit.endSeconds ?? 'none',
+        hit.chunkIndex ?? 'none',
+        hit.pageChunkIndex ?? 'none',
+      ].join(':');
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
 }
 
 async function callGemini(prompt: string) {
@@ -323,7 +381,7 @@ export async function POST(
     }
 
     const latestUserMessage = messages[messages.length - 1];
-    const retrievalTarget = buildRetrievalTarget(
+    const retrievalTargets = buildRetrievalTargets(
       request,
       classId,
       bookId,
@@ -331,28 +389,31 @@ export async function POST(
       moduleBookIds,
       latestUserMessage.content
     );
-    const retrievalResponse = await fetch(retrievalTarget.url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: authHeader,
-      },
-      body: JSON.stringify(retrievalTarget.body),
-      cache: 'no-store',
-    });
+    const retrievalPayloads = await Promise.all(
+      retrievalTargets.map(async (target) => {
+        const retrievalResponse = await fetch(target.url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: authHeader,
+          },
+          body: JSON.stringify(target.body),
+          cache: 'no-store',
+        });
 
-    const retrievalPayload = await retrievalResponse.json().catch(() => null) as
-      | { hits?: RetrievalHit[]; error?: string }
-      | null;
+        const retrievalPayload = await retrievalResponse.json().catch(() => null) as
+          | { hits?: RetrievalHit[]; error?: string }
+          | null;
 
-    if (!retrievalResponse.ok) {
-      return NextResponse.json(
-        { error: retrievalPayload?.error || 'Failed to search the book' },
-        { status: retrievalResponse.status }
-      );
-    }
+        if (!retrievalResponse.ok) {
+          throw new Error(retrievalPayload?.error || 'Failed to search the selected resources');
+        }
 
-    const hits = Array.isArray(retrievalPayload?.hits) ? retrievalPayload.hits : [];
+        return Array.isArray(retrievalPayload?.hits) ? retrievalPayload.hits : [];
+      })
+    );
+
+    const hits = mergeRetrievalHits(retrievalPayloads);
     if (hits.length === 0) {
       return NextResponse.json({
         answer:
