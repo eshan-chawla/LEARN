@@ -5,7 +5,7 @@ import { ProfileMenu } from '@/components/ProfileMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { supabase } from '@/lib/supabase';
 
 interface BookData {
@@ -54,6 +54,12 @@ const bookStatusAccent: Record<string, string> = {
   failed: 'bg-rose-500',
 };
 
+const DEFAULT_AI_PANEL_WIDTH = 384;
+const MIN_AI_PANEL_WIDTH = 320;
+const MAX_AI_PANEL_WIDTH = 720;
+const MIN_VIEWER_WIDTH = 420;
+const AI_PANEL_WIDTH_STORAGE_KEY = 'smart-learn-book-ask-ai-width';
+
 export default function BookViewerPage() {
   const auth = useAuth();
   const router = useRouter();
@@ -70,12 +76,48 @@ export default function BookViewerPage() {
   const [viewerBaseUrl, setViewerBaseUrl] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiPanelWidth, setAiPanelWidth] = useState(DEFAULT_AI_PANEL_WIDTH);
+  const [isAiPanelResizing, setIsAiPanelResizing] = useState(false);
   const [sidebarLoading, setSidebarLoading] = useState(true);
   const [bookSections, setBookSections] = useState<BookSectionData[]>([]);
   const [sidebarBooks, setSidebarBooks] = useState<SidebarBookData[]>([]);
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const loadingRef = useRef(false);
   const loadedBookIdRef = useRef<string | null>(null);
+  const layoutRef = useRef<HTMLDivElement | null>(null);
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+  const resizeFrameRef = useRef<number | null>(null);
+  const pendingAiPanelWidthRef = useRef(aiPanelWidth);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const storedWidth = window.localStorage.getItem(AI_PANEL_WIDTH_STORAGE_KEY);
+    if (!storedWidth) return;
+
+    const parsedWidth = Number(storedWidth);
+    if (Number.isFinite(parsedWidth)) {
+      setAiPanelWidth(Math.max(MIN_AI_PANEL_WIDTH, Math.min(MAX_AI_PANEL_WIDTH, parsedWidth)));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(AI_PANEL_WIDTH_STORAGE_KEY, String(aiPanelWidth));
+  }, [aiPanelWidth]);
+
+  useEffect(() => {
+    return () => {
+      resizeCleanupRef.current?.();
+      if (resizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(resizeFrameRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    pendingAiPanelWidthRef.current = aiPanelWidth;
+  }, [aiPanelWidth]);
 
   const loadSidebar = useCallback(async (classId: string, currentBookId: string) => {
     try {
@@ -216,6 +258,55 @@ export default function BookViewerPage() {
     setViewerUrl(`${viewerBaseUrl}#page=${Math.trunc(pageNumber)}`);
   }, [viewerBaseUrl]);
 
+  const handleAiPanelResizeStart = useCallback((event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (typeof window === 'undefined') return;
+
+    event.preventDefault();
+    setIsAiPanelResizing(true);
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const layoutBounds = layoutRef.current?.getBoundingClientRect();
+      if (!layoutBounds) return;
+
+      const maxAvailableWidth = Math.max(
+        MIN_AI_PANEL_WIDTH,
+        Math.min(MAX_AI_PANEL_WIDTH, layoutBounds.width - MIN_VIEWER_WIDTH)
+      );
+      const rawWidth = layoutBounds.right - moveEvent.clientX;
+      const nextWidth = Math.max(MIN_AI_PANEL_WIDTH, Math.min(maxAvailableWidth, rawWidth));
+
+      pendingAiPanelWidthRef.current = nextWidth;
+
+      if (resizeFrameRef.current !== null) return;
+
+      resizeFrameRef.current = window.requestAnimationFrame(() => {
+        resizeFrameRef.current = null;
+        setAiPanelWidth(pendingAiPanelWidthRef.current);
+      });
+    };
+
+    const handleMouseUp = () => {
+      if (resizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(resizeFrameRef.current);
+        resizeFrameRef.current = null;
+      }
+
+      setAiPanelWidth(pendingAiPanelWidthRef.current);
+      setIsAiPanelResizing(false);
+      document.body.style.removeProperty('cursor');
+      document.body.style.removeProperty('user-select');
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+      resizeCleanupRef.current = null;
+    };
+
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    resizeCleanupRef.current = handleMouseUp;
+  }, []);
+
   if (auth.loading || loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[linear-gradient(180deg,rgba(246,243,237,0.94),rgba(240,236,229,0.98))]">
@@ -335,7 +426,14 @@ export default function BookViewerPage() {
         </div>
       </header>
 
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      <div ref={layoutRef} className="relative flex min-h-0 flex-1 overflow-hidden">
+        {isAiPanelResizing && (
+          <div
+            className="absolute inset-0 z-10 hidden cursor-col-resize md:block"
+            aria-hidden="true"
+          />
+        )}
+
         {sidebarOpen && (
           <button
             type="button"
@@ -520,8 +618,11 @@ export default function BookViewerPage() {
           classId={bookResponse.book.class_id}
           bookTitle={bookResponse.book.title}
           open={aiPanelOpen}
+          desktopWidth={aiPanelWidth}
+          resizing={isAiPanelResizing}
           onClose={() => setAiPanelOpen(false)}
           onJumpToPage={jumpToPage}
+          onResizeStart={handleAiPanelResizeStart}
         />
       </div>
     </div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { supabase } from '@/lib/supabase';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 
 type ChatRole = 'user' | 'assistant';
 
@@ -23,8 +23,11 @@ interface BookAskAIPanelProps {
   classId: string;
   bookTitle: string;
   open: boolean;
+  desktopWidth: number;
+  resizing: boolean;
   onClose: () => void;
   onJumpToPage: (pageNumber: number) => void;
+  onResizeStart: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }
 
 function createMessage(role: ChatRole, content: string, sources?: ChatSource[]): ChatMessage {
@@ -41,8 +44,11 @@ export function BookAskAIPanel({
   classId,
   bookTitle,
   open,
+  desktopWidth,
+  resizing,
   onClose,
   onJumpToPage,
+  onResizeStart,
 }: BookAskAIPanelProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([
     createMessage(
@@ -145,11 +151,28 @@ export function BookAskAIPanel({
     }
   };
 
+  const panelStyle = {
+    '--ask-ai-width': `${desktopWidth}px`,
+  } as CSSProperties;
+
   return (
     <aside
-      className={`absolute inset-y-0 right-0 z-20 flex w-[24rem] flex-col overflow-hidden bg-[rgba(250,247,242,0.98)] transition-[transform,width,opacity,box-shadow,border-color] duration-300 md:relative md:inset-y-auto md:right-auto md:z-0 md:flex-shrink-0 md:translate-x-0 ${open ? 'pointer-events-auto translate-x-0 border-l border-stone-200/80 opacity-100 shadow-[-24px_24px_60px_rgba(28,25,23,0.12)] md:w-[24rem] md:shadow-none' : 'pointer-events-none translate-x-full border-l border-transparent opacity-100 md:w-0 md:translate-x-0 md:border-l-0 md:opacity-0 md:shadow-none'}`}
+      style={panelStyle}
+      className={`absolute inset-y-0 right-0 z-20 flex w-[24rem] flex-col overflow-hidden bg-[rgba(250,247,242,0.98)] ${resizing ? 'transition-[transform,opacity,box-shadow,border-color] duration-75' : 'transition-[transform,width,opacity,box-shadow,border-color] duration-300'} md:relative md:inset-y-auto md:right-auto md:z-0 md:flex-shrink-0 md:translate-x-0 ${open ? 'pointer-events-auto translate-x-0 border-l border-stone-200/80 opacity-100 shadow-[-24px_24px_60px_rgba(28,25,23,0.12)] md:w-[var(--ask-ai-width)] md:shadow-none' : 'pointer-events-none translate-x-full border-l border-transparent opacity-100 md:w-0 md:translate-x-0 md:border-l-0 md:opacity-0 md:shadow-none'}`}
       aria-hidden={!open}
     >
+      {open && (
+        <button
+          type="button"
+          onMouseDown={onResizeStart}
+          className="absolute inset-y-0 left-0 hidden w-4 cursor-col-resize items-center justify-center md:flex"
+          aria-label="Resize Ask AI panel"
+          title="Drag to resize"
+        >
+          <span className={`h-16 w-px rounded-full transition-colors ${resizing ? 'bg-sky-500' : 'bg-stone-300'}`} />
+        </button>
+      )}
+
       <div className="flex items-center justify-between gap-3 border-b border-stone-200/80 px-4 py-4">
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">Ask AI</p>
