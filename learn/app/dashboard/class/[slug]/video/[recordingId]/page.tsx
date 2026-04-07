@@ -113,13 +113,6 @@ export default function VideoViewerPage() {
 
       const data: RecordingResponse = await response.json();
 
-      if (data.recording.processing_status === 'processing') {
-        setError('This video is currently being processed. Please check back in a few minutes.');
-        setLoading(false);
-        loadingRef.current = false;
-        return;
-      }
-
       setRecordingResponse(data);
       setLoading(false);
     } catch (err: unknown) {

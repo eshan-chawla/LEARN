@@ -14,6 +14,8 @@ interface ChatSource {
   sourceId: string;
   contentType: 'pdf' | 'video';
   title: string | null;
+  startSeconds: number | null;
+  endSeconds: number | null;
 }
 
 interface ChatMessage {
@@ -68,6 +70,23 @@ function createWelcomeMessage(bookTitle: string) {
 
 function formatSimilarityScore(score: number): string {
   return Number.isFinite(score) ? `${Math.round(score * 100)}%` : 'N/A';
+}
+
+function formatTimecode(value: number | null) {
+  if (value === null || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  const rounded = Math.floor(value);
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const seconds = rounded % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function getScopeSummary(
@@ -137,6 +156,12 @@ function normalizeMessages(value: unknown, bookTitle: string): ChatMessage[] {
                 contentType,
                 title: typeof (source as { title?: unknown }).title === 'string'
                   ? (source as { title: string }).title
+                  : null,
+                startSeconds: typeof (source as { startSeconds?: unknown }).startSeconds === 'number'
+                  ? (source as { startSeconds: number }).startSeconds
+                  : null,
+                endSeconds: typeof (source as { endSeconds?: unknown }).endSeconds === 'number'
+                  ? (source as { endSeconds: number }).endSeconds
                   : null,
               } satisfies ChatSource;
             })
@@ -386,7 +411,18 @@ export function BookAskAIPanel({
   };
 
   const handleSourceClick = (source: ChatSource) => {
-    if (source.contentType !== 'pdf') {
+    if (source.contentType === 'video') {
+      const nextParams = new URLSearchParams();
+      if (source.startSeconds !== null) {
+        nextParams.set('t', String(Math.floor(source.startSeconds)));
+      }
+
+      const queryString = nextParams.toString();
+      router.push(
+        queryString
+          ? `/dashboard/class/${classSlug}/video/${source.sourceId}?${queryString}`
+          : `/dashboard/class/${classSlug}/video/${source.sourceId}`
+      );
       return;
     }
 
@@ -586,8 +622,16 @@ export function BookAskAIPanel({
                       <div className="space-y-2 pt-1">
                         {message.sources.map((source, index) => {
                           const canInteractWithSource =
-                            source.contentType === 'pdf' &&
-                            (source.sourceId !== bookId || source.pageNumber !== null);
+                            source.contentType === 'video'
+                              ? true
+                              : source.contentType === 'pdf' &&
+                                (source.sourceId !== bookId || source.pageNumber !== null);
+                          const videoTimeRange =
+                            source.contentType === 'video'
+                              ? [formatTimecode(source.startSeconds), formatTimecode(source.endSeconds)]
+                                  .filter(Boolean)
+                                  .join(' - ')
+                              : null;
 
                           return (
                             <div key={`${message.id}-${index}`} className="group relative">
@@ -604,11 +648,11 @@ export function BookAskAIPanel({
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="space-y-1">
                                     <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                                      {source.pageNumber
+                                      {source.contentType === 'video'
+                                        ? videoTimeRange || 'Transcript excerpt'
+                                        : source.pageNumber
                                         ? `Page ${source.pageNumber}`
-                                        : source.contentType === 'video'
-                                          ? 'Transcript excerpt'
-                                          : 'Page unavailable'}
+                                        : 'Page unavailable'}
                                     </span>
                                     <span className="block truncate text-sm font-medium text-stone-700">
                                       {source.contentType === 'pdf'
@@ -620,8 +664,10 @@ export function BookAskAIPanel({
                                     </span>
                                   </div>
                                   <span className="pt-0.5 text-xs font-medium text-stone-400">
-                                    {source.contentType !== 'pdf'
-                                      ? 'Preview only'
+                                    {source.contentType === 'video'
+                                      ? 'Open source'
+                                      : source.contentType !== 'pdf'
+                                        ? 'Preview only'
                                       : source.sourceId !== bookId
                                         ? 'Open source'
                                         : source.pageNumber

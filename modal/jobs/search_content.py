@@ -73,6 +73,10 @@ def search_content_impl(
                 "pageNumber": payload.get("page_number"),
                 "pageChunkIndex": payload.get("page_chunk_index"),
                 "chunkIndex": payload.get("chunk_index"),
+                "startSeconds": payload.get("start_seconds"),
+                "endSeconds": payload.get("end_seconds"),
+                "transcriptChunkIndex": payload.get("transcript_chunk_index"),
+                "transcriptLanguage": payload.get("transcript_language"),
             }
         )
 

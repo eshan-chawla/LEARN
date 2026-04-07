@@ -23,6 +23,10 @@ export interface RetrievalHit {
   pageNumber: number | null;
   pageChunkIndex: number | null;
   chunkIndex: number | null;
+  startSeconds: number | null;
+  endSeconds: number | null;
+  transcriptChunkIndex: number | null;
+  transcriptLanguage: string | null;
 }
 
 export interface RetrievalSearchResponse {

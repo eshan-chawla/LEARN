@@ -20,6 +20,8 @@ interface RetrievalHit {
   pageNumber: number | null;
   pageChunkIndex: number | null;
   chunkIndex: number | null;
+  startSeconds: number | null;
+  endSeconds: number | null;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -107,19 +109,38 @@ function summarizeConversation(messages: ChatMessage[]) {
     .join('\n\n');
 }
 
+function formatTimecode(value: number | null) {
+  if (value === null || !Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  const rounded = Math.floor(value);
+  const hours = Math.floor(rounded / 3600);
+  const minutes = Math.floor((rounded % 3600) / 60);
+  const seconds = rounded % 60;
+
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
 function buildContext(hits: RetrievalHit[], bookTitle: string) {
   return hits
     .map((hit, index) => {
-      const locatorLabel = hit.pageNumber
-        ? `Page ${hit.pageNumber}`
-        : hit.contentType === 'video'
-          ? 'Transcript excerpt'
+      const locatorLabel = hit.contentType === 'video'
+        ? [formatTimecode(hit.startSeconds) || 'Unknown start', formatTimecode(hit.endSeconds)]
+            .filter(Boolean)
+            .join(' - ')
+        : hit.pageNumber
+          ? `Page ${hit.pageNumber}`
           : 'Page unavailable';
       return [
         `Excerpt ${index + 1}`,
         `Source type: ${hit.contentType === 'video' ? 'Class recording transcript' : 'Book passage'}`,
         `Source title: ${hit.title || bookTitle}`,
-        `Location: ${locatorLabel}`,
+        `Location: ${locatorLabel || (hit.contentType === 'video' ? 'Transcript excerpt' : 'Page unavailable')}`,
         hit.text,
       ].join('\n');
     })
@@ -134,8 +155,8 @@ function buildSources(hits: RetrievalHit[]) {
       const key = [
         hit.contentType,
         hit.sourceId,
-        hit.pageNumber ?? 'none',
-        hit.pageChunkIndex ?? hit.chunkIndex ?? 'none',
+        hit.contentType === 'video' ? hit.startSeconds ?? 'none' : hit.pageNumber ?? 'none',
+        hit.contentType === 'video' ? hit.endSeconds ?? 'none' : hit.pageChunkIndex ?? hit.chunkIndex ?? 'none',
       ].join(':');
       if (seen.has(key)) return false;
       seen.add(key);
@@ -149,6 +170,8 @@ function buildSources(hits: RetrievalHit[]) {
       sourceId: hit.sourceId,
       contentType: hit.contentType,
       title: hit.title,
+      startSeconds: hit.startSeconds,
+      endSeconds: hit.endSeconds,
     }));
 }
 

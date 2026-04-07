@@ -1,6 +1,6 @@
-# Modal PDF Processing - Deployment Guide
+# Modal Content Processing - Deployment Guide
 
-This service processes PDFs from S3, chunks them page-by-page, embeds them, and stores them in a shared Qdrant collection.
+This service processes PDFs and videos from S3, embeds them, and stores them in a shared Qdrant collection.
 
 Embedding model:
 - `gemini-embedding-001`
@@ -16,8 +16,9 @@ Embedding model:
 Browser -> Vercel upload route -> S3
 Vercel -> books row in Supabase
 Vercel /api/process-pdf -> Modal webhook
+Vercel /api/process-video -> Modal webhook
 Modal -> S3 download -> chunk/embed -> Qdrant
-Modal -> books.processing_status update in Supabase
+Modal -> books.processing_status / recordings.processing_status update in Supabase
 Vercel /api/retrieval/* -> Modal retrieval webhook -> Qdrant search
 ```
 
@@ -28,8 +29,9 @@ Important payload filters:
 - `class_id`
 - `content_type`
 
-Current content type:
+Current content types:
 - `pdf`
+- `video`
 
 ## Prerequisites
 
@@ -110,8 +112,8 @@ Legacy compatibility entrypoint still exists:
 modal deploy modal/pdf_processor.py
 ```
 
-Copy the generated webhook URL.
-You will have one URL for PDF processing and one URL for retrieval search.
+Copy the generated webhook URLs.
+You will have one URL for PDF processing, one URL for video processing, and one URL for retrieval search.
 
 ## 4. Configure Vercel / Next.js
 
@@ -119,6 +121,7 @@ Set these env vars in Vercel and `.env.local`:
 
 ```bash
 MODAL_WEBHOOK_URL=https://your-username--pdf-processor-process-pdf-webhook.modal.run
+MODAL_VIDEO_WEBHOOK_URL=https://your-username--pdf-processor-process-video-webhook.modal.run
 MODAL_WEBHOOK_SECRET=your-random-shared-secret
 MODAL_RETRIEVAL_WEBHOOK_URL=https://your-username--pdf-processor-search-content-webhook.modal.run
 ```
@@ -151,6 +154,20 @@ Retrieval requests send this payload:
 }
 ```
 
+Video processing requests send this payload:
+
+```json
+{
+  "webhook_secret": "shared-secret",
+  "recording_id": "uuid",
+  "class_id": "uuid",
+  "title": "Lecture 07",
+  "storage_path": "videos/class-id/lecture-07.mp4",
+  "file_name": "lecture-07.mp4",
+  "duration": 3672
+}
+```
+
 ## 6. Qdrant payload schema
 
 Each point currently stores:
@@ -166,6 +183,16 @@ Each point currently stores:
 - `chunk_index`
 - `text`
 
+Video points additionally store:
+
+- `start_seconds`
+- `end_seconds`
+- `transcript_chunk_index`
+- `segment_start_index`
+- `segment_end_index`
+- `transcript_language`
+- `duration_seconds`
+
 This schema is designed so video transcript ingestion can later reuse the same collection with `content_type = video`.
 
 Collection vector config:
@@ -174,16 +201,14 @@ Collection vector config:
 
 ## 7. Current status tracking
 
-The worker updates `books.processing_status`:
+The PDF worker updates `books.processing_status`:
 
 - `pending`
 - `processing`
 - `completed`
 - `failed`
 
-If processing fails, `books.error_message` is populated.
-
-There is no `pdf_processing_jobs` table in the current Stage 1 setup.
+The video worker updates `recordings.processing_status` with the same state machine.
 
 ## 8. Verification
 
@@ -199,6 +224,16 @@ modal app logs pdf-processor
 5. Confirm the book row becomes `completed`
 6. Confirm Qdrant has points in `class_content_embeddings`
 7. Inspect payload metadata for `class_id`, `content_type`, `file_name`, and `page_number`
+
+For video verification:
+
+1. Upload an MP4 in the app
+2. Confirm the recording row exists with `processing_status = pending`
+3. Trigger `Process Video`
+4. Confirm `/api/process-video` returns success
+5. Check Modal logs
+6. Confirm the recording row becomes `completed`
+7. Inspect Qdrant payload metadata for `content_type = video`, `start_seconds`, and `end_seconds`
 
 ## 9. Reset for Gemini migration
 
@@ -217,7 +252,7 @@ This keeps the collection name the same but resets it to the new vector size.
   - `modal/webhooks/` for webhook entrypoints
   - `modal/lib/` for shared helpers
 - The service currently chunks per page to preserve page metadata.
+- Videos are transcribed with Whisper on Modal and then chunked into timestamp-aware transcript spans.
 - The embedding worker uses Gemini's hosted embeddings through the `google-genai` SDK.
 - For non-`3072` Gemini dimensions, embeddings are normalized before they are stored or queried.
 - The collection is shared across classes; retrieval must always filter by `class_id`.
-- Later video transcript ingestion should use the same collection and set `content_type = video`.

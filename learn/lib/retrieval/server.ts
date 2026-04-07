@@ -174,6 +174,12 @@ function mapModalHit(hit: Record<string, unknown>): RetrievalHit {
     pageNumber: typeof hit.pageNumber === 'number' ? hit.pageNumber : null,
     pageChunkIndex: typeof hit.pageChunkIndex === 'number' ? hit.pageChunkIndex : null,
     chunkIndex: typeof hit.chunkIndex === 'number' ? hit.chunkIndex : null,
+    startSeconds: typeof hit.startSeconds === 'number' ? hit.startSeconds : null,
+    endSeconds: typeof hit.endSeconds === 'number' ? hit.endSeconds : null,
+    transcriptChunkIndex:
+      typeof hit.transcriptChunkIndex === 'number' ? hit.transcriptChunkIndex : null,
+    transcriptLanguage:
+      typeof hit.transcriptLanguage === 'string' ? hit.transcriptLanguage : null,
   };
 }
 

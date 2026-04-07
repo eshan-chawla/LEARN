@@ -1,13 +1,14 @@
 # Learn - Student Learning Aid Platform
 
-A Next.js application that helps students organize their classes, upload PDFs with AI-powered processing, record lectures, and take private markdown notes.
+A Next.js application that helps students organize their classes, upload PDFs with AI-powered processing, record lectures, process transcripts for retrieval, and take private markdown notes.
 
 ## Features
 
 - **Class Management**: Create and organize multiple classes with slug-based URLs
 - **PDF Upload & Processing**: Upload PDFs that are processed into page-aware embeddings with rich metadata for retrieval
+- **Video Transcript Processing**: Process uploaded class recordings into timestamped transcript embeddings for retrieval
 - **Private Markdown Notes**: Take personal markdown notes for each class
-- **Video Recordings**: Upload and manage lecture recordings
+- **Video Recordings**: Upload, watch, and process lecture recordings
 - **Secure Authentication**: Email/password authentication with Supabase
 - **Row-Level Security**: All data is isolated per user
 
@@ -26,7 +27,7 @@ A Next.js application that helps students organize their classes, upload PDFs wi
 
 - Node.js 20+
 - Supabase account
-- Modal account (for PDF processing)
+- Modal account (for PDF and video processing)
 - Python 3.11+ (for Modal deployment)
 
 ### 1. Clone and Install
@@ -66,13 +67,14 @@ SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 GEMINI_API_KEY=your-gemini-api-key
 GEMINI_CHAT_MODEL=gemini-2.5-flash-lite
 
-# Modal Configuration (for PDF processing)
+# Modal Configuration (for PDF and video processing)
 MODAL_WEBHOOK_URL=your-modal-webhook-url
+MODAL_VIDEO_WEBHOOK_URL=your-modal-video-webhook-url
 MODAL_WEBHOOK_SECRET=your-modal-webhook-secret
 MODAL_RETRIEVAL_WEBHOOK_URL=your-modal-retrieval-webhook-url
 ```
 
-### 4. Deploy PDF Processing to Modal
+### 4. Deploy Processing to Modal
 
 Follow the complete guide in `modal/DEPLOYMENT.md`:
 
@@ -94,7 +96,7 @@ modal secret create modal-webhook-secret MODAL_WEBHOOK_SECRET=...
 modal deploy modal/app.py
 ```
 
-After deployment, copy the webhook URL to your `.env.local`.
+After deployment, copy the PDF processing webhook URL, the video processing webhook URL, and the retrieval webhook URL to your `.env.local`.
 
 ### 5. Run Development Server
 
@@ -110,7 +112,8 @@ Open [http://localhost:3000](http://localhost:3000) to see the application.
 learn/
 ├── app/                      # Next.js App Router
 │   ├── api/                  # API routes
-│   │   └── process-pdf/      # PDF processing endpoint
+│   │   ├── process-pdf/      # PDF processing endpoint
+│   │   └── process-video/    # Video transcript processing endpoint
 │   ├── auth/                 # Authentication pages
 │   ├── dashboard/            # Dashboard and class pages
 │   └── layout.tsx            # Root layout
@@ -153,6 +156,19 @@ learn/
 4. Modal generates the query embedding with the same embedding model used for PDF ingestion
 5. Modal searches Qdrant with a required `class_id` filter and optional content/source filters
 6. Ranked chunks and metadata are returned back through the Next.js API route
+
+### Video Processing Flow
+
+1. User uploads an MP4 via the class recordings tab
+2. File is stored in S3 (`videos/{class_id}/{filename}.mp4`)
+3. Next.js API calls the Modal video webhook with recording metadata and a shared webhook secret
+4. Modal function:
+   - Downloads the video from S3
+   - Transcribes it with Whisper on Modal
+   - Groups transcript segments into timestamp-aware chunks
+   - Generates embeddings using Gemini `gemini-embedding-001`
+   - Stores vectors in the shared Qdrant collection with `class_id`, `content_type = video`, `file_name`, and `start_seconds` / `end_seconds`
+   - Updates `recordings.processing_status` in Supabase
 
 ### Authentication
 

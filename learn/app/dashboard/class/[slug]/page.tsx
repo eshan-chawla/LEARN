@@ -183,10 +183,14 @@ function formatDuration(duration: number | null) {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function getFileNameFromStoragePath(storagePath: string | null, fallbackTitle: string) {
-  if (!storagePath) return `${fallbackTitle}.pdf`;
+function getFileNameFromStoragePath(
+  storagePath: string | null,
+  fallbackTitle: string,
+  fallbackExtension = '.pdf'
+) {
+  if (!storagePath) return `${fallbackTitle}${fallbackExtension}`;
   const segments = storagePath.split('/');
-  return segments[segments.length - 1] || `${fallbackTitle}.pdf`;
+  return segments[segments.length - 1] || `${fallbackTitle}${fallbackExtension}`;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -254,6 +258,7 @@ export default function ClassPage() {
   const [videoUploadModalOpen, setVideoUploadModalOpen] = useState(false);
   const [members, setMembers] = useState<ClassMember[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  const [recordingMenu, setRecordingMenu] = useState<{ recordingId: string; top: number; left: number } | null>(null);
   const [bookMenu, setBookMenu] = useState<{ bookId: string; top: number; left: number } | null>(null);
   const [memberEmail, setMemberEmail] = useState('');
   const [memberError, setMemberError] = useState<string | null>(null);
@@ -274,6 +279,7 @@ export default function ClassPage() {
   const [recordingTitleDraft, setRecordingTitleDraft] = useState('');
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [bookTitleDraft, setBookTitleDraft] = useState('');
+  const [processingRecordingId, setProcessingRecordingId] = useState<string | null>(null);
   const [processingBookId, setProcessingBookId] = useState<string | null>(null);
   const [deletingRecordingId, setDeletingRecordingId] = useState<string | null>(null);
   const [deletingBookId, setDeletingBookId] = useState<string | null>(null);
@@ -281,6 +287,7 @@ export default function ClassPage() {
   const [bookDropTarget, setBookDropTarget] = useState<BookDropTarget | null>(null);
   const accessTokenRef = useRef<string | null>(null);
   const draggedBookRef = useRef<DraggedBook | null>(null);
+  const recordingMenuRef = useRef<HTMLDivElement | null>(null);
   const bookMenuRef = useRef<HTMLDivElement | null>(null);
   const memberMenuRef = useRef<HTMLDivElement | null>(null);
   const noteContentRef = useRef('');
@@ -440,6 +447,47 @@ export default function ClassPage() {
   useEffect(() => {
     canUseNotesRef.current = canUseNotes;
   }, [canUseNotes]);
+
+  useEffect(() => {
+    if (!recordingMenu) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target) return;
+
+      if (recordingMenuRef.current?.contains(target)) {
+        return;
+      }
+
+      if (target.closest(`[data-recording-menu-trigger="${recordingMenu.recordingId}"]`)) {
+        return;
+      }
+
+      setRecordingMenu(null);
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setRecordingMenu(null);
+      }
+    };
+
+    const closeMenu = () => {
+      setRecordingMenu(null);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('resize', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [recordingMenu]);
 
   useEffect(() => {
     if (!bookMenu) return;
@@ -1059,6 +1107,7 @@ export default function ClassPage() {
   const handleDeleteRecording = async (recording: Recording) => {
     if (!canEditClass) return;
 
+    setRecordingMenu(null);
     const confirmed = window.confirm(`Delete "${recording.title}"? This will remove the video file too.`);
     if (!confirmed) return;
 
@@ -1088,6 +1137,65 @@ export default function ClassPage() {
       alert(getErrorMessage(error, 'Failed to delete recording'));
     } finally {
       setDeletingRecordingId(null);
+    }
+  };
+
+  const handleProcessRecording = async (recording: Recording) => {
+    if (!canEditClass) return;
+    if (!recording.storage_path) {
+      alert('This recording does not have a storage path to process.');
+      return;
+    }
+
+    setRecordingMenu(null);
+
+    try {
+      setProcessingRecordingId(recording.id);
+
+      const { error: updateError } = await supabase
+        .from('recordings')
+        .update({
+          processing_status: 'pending',
+        })
+        .eq('id', recording.id);
+
+      if (updateError) throw updateError;
+
+      setRecordings((currentRecordings) =>
+        currentRecordings.map((currentRecording) =>
+          currentRecording.id === recording.id
+            ? { ...currentRecording, processing_status: 'pending' }
+            : currentRecording
+        )
+      );
+
+      const response = await fetch('/api/process-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recording_id: recording.id,
+          class_id: recording.class_id,
+          title: recording.title,
+          storage_path: recording.storage_path,
+          file_name: getFileNameFromStoragePath(recording.storage_path, recording.title, '.mp4'),
+          duration: recording.duration,
+        }),
+      });
+
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(
+          typeof payload?.error === 'string' ? payload.error : 'Failed to start video processing'
+        );
+      }
+
+      await loadRecordings();
+    } catch (error) {
+      console.error('Error processing recording:', error);
+      alert(getErrorMessage(error, 'Failed to start video processing'));
+      await loadRecordings();
+    } finally {
+      setProcessingRecordingId(null);
     }
   };
 
@@ -1337,6 +1445,9 @@ export default function ClassPage() {
     books: books.filter((book) => book.section_id === section.id).sort(compareBooks),
   }));
   const unassignedBooks = books.filter((book) => book.section_id === null).sort(compareBooks);
+  const activeRecordingMenuRecording = recordingMenu
+    ? recordings.find((recording) => recording.id === recordingMenu.recordingId) ?? null
+    : null;
   const activeBookMenuBook = bookMenu
     ? books.find((book) => book.id === bookMenu.bookId) ?? null
     : null;
@@ -1792,11 +1903,26 @@ export default function ClassPage() {
                                   </Link>
                                   {canEditClass && (
                                     <button
-                                      onClick={() => void handleDeleteRecording(recording)}
-                                      disabled={deletingRecordingId === recording.id}
-                                      className="rounded-xl bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                      onClick={(event) => {
+                                        const rect = event.currentTarget.getBoundingClientRect();
+                                        const menuWidth = 192;
+                                        const menuLeft = Math.min(window.innerWidth - menuWidth - 16, Math.max(16, rect.right - menuWidth));
+                                        const menuTop = Math.min(window.innerHeight - 16, rect.bottom + 8);
+
+                                        setRecordingMenu((current) => (
+                                          current?.recordingId === recording.id
+                                            ? null
+                                            : { recordingId: recording.id, top: menuTop, left: menuLeft }
+                                        ));
+                                      }}
+                                      data-recording-menu-trigger={recording.id}
+                                      disabled={processingRecordingId === recording.id || deletingRecordingId === recording.id}
+                                      className="rounded-xl border border-stone-300 bg-white p-2 text-stone-500 transition hover:border-stone-400 hover:bg-stone-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                      aria-label={`Open actions for ${recording.title}`}
                                     >
-                                      {deletingRecordingId === recording.id ? 'Deleting...' : 'Delete'}
+                                      <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                                        <path d="M10 6a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 5.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm0 5.5a1.5 1.5 0 110-3 1.5 1.5 0 010 3z" />
+                                      </svg>
                                     </button>
                                   )}
                                 </div>
@@ -2184,6 +2310,27 @@ export default function ClassPage() {
           onClose={() => setBookUploadTarget(null)}
           onSuccess={handleBookUploadSuccess}
         />
+      )}
+
+      {recordingMenu && activeRecordingMenuRecording && (
+        <div
+          ref={recordingMenuRef}
+          className="fixed z-50 min-w-52 overflow-hidden rounded-2xl border border-stone-200 bg-white/95 py-1 shadow-[0_22px_60px_rgba(15,23,42,0.16)] backdrop-blur"
+          style={{ top: recordingMenu.top, left: recordingMenu.left }}
+        >
+          <button
+            onClick={() => void handleProcessRecording(activeRecordingMenuRecording)}
+            className="block w-full px-4 py-2.5 text-left text-sm font-medium text-stone-700 hover:bg-stone-50"
+          >
+            {processingRecordingId === activeRecordingMenuRecording.id ? 'Processing...' : 'Process Video'}
+          </button>
+          <button
+            onClick={() => void handleDeleteRecording(activeRecordingMenuRecording)}
+            className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+          >
+            {deletingRecordingId === activeRecordingMenuRecording.id ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
       )}
 
       {bookMenu && activeBookMenuBook && (
