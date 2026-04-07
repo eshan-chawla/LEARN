@@ -39,6 +39,10 @@ function createMessage(role: ChatRole, content: string, sources?: ChatSource[]):
   };
 }
 
+function formatSimilarityScore(score: number): string {
+  return Number.isFinite(score) ? `${Math.round(score * 100)}%` : 'N/A';
+}
+
 export function BookAskAIPanel({
   bookId,
   classId,
@@ -254,11 +258,16 @@ export function BookAskAIPanel({
                               className="w-full rounded-2xl border border-stone-200 bg-stone-50/80 px-3 py-3 text-left transition hover:border-stone-300 hover:bg-white disabled:cursor-default"
                               disabled={!source.pageNumber}
                             >
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                                  {source.pageNumber ? `Page ${source.pageNumber}` : 'Page unavailable'}
-                                </span>
-                                <span className="text-xs font-medium text-stone-400">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="space-y-1">
+                                  <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
+                                    {source.pageNumber ? `Page ${source.pageNumber}` : 'Page unavailable'}
+                                  </span>
+                                  <span className="block text-[11px] font-medium text-stone-400">
+                                    Similarity {formatSimilarityScore(source.score)}
+                                  </span>
+                                </div>
+                                <span className="pt-0.5 text-xs font-medium text-stone-400">
                                   {source.pageNumber ? 'Hover to preview' : 'No page link'}
                                 </span>
                               </div>
