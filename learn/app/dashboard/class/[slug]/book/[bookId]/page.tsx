@@ -431,14 +431,18 @@ export default function BookViewerPage() {
               </svg>
             </button>
             <div className="min-w-0">
-              <Link
-                href="/dashboard"
-                className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500 transition hover:text-stone-700"
-              >
-                <span>Smart Learn Reader</span>
+              <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">
+                <Link href="/dashboard" className="transition hover:text-stone-700">
+                  <span>Smart Learn Reader</span>
+                </Link>
                 <span className="hidden h-1 w-1 rounded-full bg-stone-300 sm:block" />
-                <span className="hidden sm:block">{bookResponse.className}</span>
-              </Link>
+                <Link
+                  href={`/dashboard/class/${bookResponse.classSlug || slug}?tab=books`}
+                  className="hidden transition hover:text-stone-700 sm:block"
+                >
+                  <span>{bookResponse.className}</span>
+                </Link>
+              </div>
               <div className="mt-1 min-w-0">
                 <h1 className="truncate text-lg font-semibold tracking-[-0.02em] text-stone-900 sm:text-2xl">
                   {bookResponse.book.title}
