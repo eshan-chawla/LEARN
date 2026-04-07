@@ -208,33 +208,36 @@ export function BookAskAIPanel({
 
               {message.sources && message.sources.length > 0 && (
                 <div className="mt-4 space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setExpandedSources((current) => ({
-                        ...current,
-                        [message.id]: !(current[message.id] ?? false),
-                      }));
-                    }}
-                    className="flex w-full items-center justify-between rounded-2xl border border-stone-200 bg-stone-50/80 px-3 py-3 text-left transition hover:border-stone-300 hover:bg-white"
-                  >
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-stone-400">
-                        Sources
-                      </p>
-                      <p className="mt-1 text-sm text-stone-600">
-                        {message.sources.length} citation{message.sources.length === 1 ? '' : 's'}
-                      </p>
-                    </div>
-                    <svg
-                      className={`h-4 w-4 flex-shrink-0 text-stone-500 transition-transform ${(expandedSources[message.id] ?? false) ? 'rotate-90' : 'rotate-0'}`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+                  <div className="flex items-center justify-start">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedSources((current) => ({
+                          ...current,
+                          [message.id]: !(current[message.id] ?? false),
+                        }));
+                      }}
+                      aria-expanded={expandedSources[message.id] ?? false}
+                      aria-label={`Show ${message.sources.length} source${message.sources.length === 1 ? '' : 's'}`}
+                      title={`${message.sources.length} source${message.sources.length === 1 ? '' : 's'}`}
+                      className="group inline-flex items-center gap-1.5 rounded-2xl border border-stone-200 bg-stone-50/80 px-2 py-1.5 text-stone-500 transition hover:border-stone-300 hover:bg-white hover:text-stone-700"
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
+                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-500 transition group-hover:border-stone-300 group-hover:text-stone-700">
+                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={1.8}
+                            d="M14 3.75H7.5A1.75 1.75 0 0 0 5.75 5.5v13A1.75 1.75 0 0 0 7.5 20.25h9A1.75 1.75 0 0 0 18.25 18.5V8L14 3.75Z"
+                          />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14 3.75V8h4.25" />
+                        </svg>
+                      </span>
+                      <span className="text-[10px] font-semibold tabular-nums text-stone-500 group-hover:text-stone-700">
+                        {message.sources.length}
+                      </span>
+                    </button>
+                  </div>
 
                   <div className={`grid transition-[grid-template-rows] duration-300 ${(expandedSources[message.id] ?? false) ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
                     <div className="overflow-hidden">
