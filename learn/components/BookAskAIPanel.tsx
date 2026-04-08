@@ -131,7 +131,7 @@ function normalizeMessages(value: unknown, bookTitle: string): ChatMessage[] {
   }
 
   const normalized = value
-    .map((message) => {
+    .map((message): ChatMessage | null => {
       if (!message || typeof message !== 'object') return null;
 
       const role = (message as { role?: unknown }).role;
@@ -178,14 +178,19 @@ function normalizeMessages(value: unknown, bookTitle: string): ChatMessage[] {
             .filter((source): source is ChatSource => source !== null)
         : undefined;
 
-      return {
+      const nextMessage: ChatMessage = {
         id: typeof (message as { id?: unknown }).id === 'string'
           ? (message as { id: string }).id
           : `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         role,
         content,
-        sources,
-      } satisfies ChatMessage;
+      };
+
+      if (sources) {
+        nextMessage.sources = sources;
+      }
+
+      return nextMessage;
     })
     .filter((message): message is ChatMessage => message !== null);
 
