@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
 from lib.chunking import chunk_transcript_segments
-from lib.constants import EMBEDDING_VECTOR_SIZE, SHARED_COLLECTION_NAME
+from lib.constants import (
+    EMBEDDING_VECTOR_SIZE,
+    SHARED_COLLECTION_NAME,
+    VIDEO_TRANSCRIPTS_PREFIX,
+)
 from lib.embeddings import encode_documents
 from lib.transcription import transcribe_media
 
@@ -35,6 +41,10 @@ def update_recording_status(
         timeout=30.0,
     )
     response.raise_for_status()
+
+
+def build_transcript_storage_path(*, class_id: str, recording_id: str) -> str:
+    return f"{VIDEO_TRANSCRIPTS_PREFIX}/{class_id}/{recording_id}/transcript.json"
 
 
 def process_video_impl(
@@ -69,6 +79,10 @@ def process_video_impl(
         aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
     )
     bucket_name = os.environ["AWS_S3_RECORDINGS_BUCKET"]
+    transcript_storage_path = build_transcript_storage_path(
+        class_id=class_id,
+        recording_id=recording_id,
+    )
 
     suffix = Path(storage_path).suffix or ".mp4"
     temp_path = Path(f"/tmp/{recording_id}{suffix}")
@@ -91,6 +105,32 @@ def process_video_impl(
         if not transcript_chunks:
             raise ValueError("No transcript chunks were produced from the recording")
 
+        transcript_document: Dict[str, Any] = {
+            "recording_id": recording_id,
+            "class_id": class_id,
+            "title": title,
+            "file_name": file_name,
+            "video_storage_path": storage_path,
+            "transcript_storage_path": transcript_storage_path,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "segments": transcript_segments,
+            "full_text": " ".join(segment["text"] for segment in transcript_segments),
+            "chunk_count": len(transcript_chunks),
+        }
+
+        if transcript_language:
+            transcript_document["language"] = transcript_language
+
+        if duration is not None:
+            transcript_document["duration_seconds"] = duration
+
+        s3.put_object(
+            Bucket=bucket_name,
+            Key=transcript_storage_path,
+            Body=json.dumps(transcript_document, ensure_ascii=True).encode("utf-8"),
+            ContentType="application/json",
+        )
+
         embeddings = encode_documents(
             [chunk["text"] for chunk in transcript_chunks],
             title=title,
@@ -105,6 +145,7 @@ def process_video_impl(
                 "title": title,
                 "file_name": file_name,
                 "storage_path": storage_path,
+                "transcript_storage_path": transcript_storage_path,
                 "start_seconds": chunk["start_seconds"],
                 "end_seconds": chunk["end_seconds"],
                 "transcript_chunk_index": chunk_index,
@@ -171,6 +212,7 @@ def process_video_impl(
             "class_id": class_id,
             "chunks_processed": len(points),
             "transcript_language": transcript_language,
+            "transcript_storage_path": transcript_storage_path,
         }
     except Exception as exc:
         try:

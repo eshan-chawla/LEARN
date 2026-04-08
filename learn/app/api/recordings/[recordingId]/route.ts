@@ -18,12 +18,17 @@ const s3 = new S3Client({
 });
 
 const BUCKET_NAME = process.env.AWS_S3_RECORDINGS_BUCKET!;
+const VIDEO_TRANSCRIPTS_PREFIX = 'transcripts/videos';
 
 interface RecordingClass {
   id: string;
   user_id: string;
   name: string;
   slug: string | null;
+}
+
+function getTranscriptStoragePath(classId: string, recordingId: string) {
+  return `${VIDEO_TRANSCRIPTS_PREFIX}/${classId}/${recordingId}/transcript.json`;
 }
 
 export async function GET(
@@ -143,6 +148,13 @@ export async function DELETE(
 
       await s3.send(command);
     }
+
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: BUCKET_NAME,
+        Key: getTranscriptStoragePath(recording.class_id, recording.id),
+      })
+    );
 
     const { error: deleteError } = await supabase
       .from('recordings')
