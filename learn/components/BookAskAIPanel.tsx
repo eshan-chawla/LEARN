@@ -44,11 +44,14 @@ interface BookAskAIPanelProps {
   moduleBookIds: string[];
   pdfSourceMeta: Record<string, PdfSourceMeta>;
   hasModuleScope: boolean;
+  sourceKind?: 'pdf' | 'video';
+  askAiPath?: string;
   open: boolean;
   desktopWidth: number;
   resizing: boolean;
   onClose: () => void;
-  onJumpToPage: (pageNumber: number) => void;
+  onJumpToPage?: (pageNumber: number) => void;
+  onJumpToTimestamp?: (seconds: number) => void;
   onResizeStart: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }
 
@@ -91,16 +94,22 @@ function formatTimecode(value: number | null) {
 
 function getScopeSummary(
   hasModuleScope: boolean,
-  resourceScopes: Record<Exclude<AskAiResourceScope, 'currentBook'>, boolean>
+  resourceScopes: Record<Exclude<AskAiResourceScope, 'currentBook'>, boolean>,
+  sourceKind: 'pdf' | 'video'
 ) {
-  if (resourceScopes.allBooks && resourceScopes.includeVideos) return 'Current book + all books + videos';
-  if (resourceScopes.allBooks) return 'Current book + all books';
-  if (resourceScopes.entireModule && resourceScopes.includeVideos && hasModuleScope) {
-    return 'Current book + module + videos';
+  const currentSourceLabel = sourceKind === 'video' ? 'Current video' : 'Current book';
+
+  if (resourceScopes.allBooks && resourceScopes.includeVideos) {
+    return `${currentSourceLabel} + all books + videos`;
   }
-  if (resourceScopes.includeVideos) return 'Current book + videos';
-  if (resourceScopes.entireModule && hasModuleScope) return 'Current book + module';
-  return 'Current book';
+
+  if (resourceScopes.allBooks) return `${currentSourceLabel} + all books`;
+  if (resourceScopes.entireModule && resourceScopes.includeVideos && hasModuleScope) {
+    return `${currentSourceLabel} + module + videos`;
+  }
+  if (resourceScopes.includeVideos) return `${currentSourceLabel} + videos`;
+  if (resourceScopes.entireModule && hasModuleScope) return `${currentSourceLabel} + module`;
+  return currentSourceLabel;
 }
 
 function normalizeResourceScopeState(value: unknown): ResourceScopeState {
@@ -205,11 +214,14 @@ export function BookAskAIPanel({
   moduleBookIds,
   pdfSourceMeta,
   hasModuleScope,
+  sourceKind = 'pdf',
+  askAiPath,
   open,
   desktopWidth,
   resizing,
   onClose,
   onJumpToPage,
+  onJumpToTimestamp,
   onResizeStart,
 }: BookAskAIPanelProps) {
   const router = useRouter();
@@ -230,7 +242,7 @@ export function BookAskAIPanel({
   const resourceMenuRef = useRef<HTMLDivElement | null>(null);
   const storageKey = `smart-learn-book-ask-ai-session:${classSlug}`;
 
-  const selectedScopeSummary = getScopeSummary(hasModuleScope, resourceScopes);
+  const selectedScopeSummary = getScopeSummary(hasModuleScope, resourceScopes, sourceKind);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -304,7 +316,6 @@ export function BookAskAIPanel({
       return {
         ...current,
         entireModule: false,
-        allBooks: false,
       };
     });
   }, [hasModuleScope, historyReady]);
@@ -359,7 +370,8 @@ export function BookAskAIPanel({
         throw new Error('No authentication token');
       }
 
-      const response = await fetch(`/api/books/${bookId}/ask-ai`, {
+      const endpoint = askAiPath || `/api/books/${bookId}/ask-ai`;
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -428,6 +440,11 @@ export function BookAskAIPanel({
 
   const handleSourceClick = (source: ChatSource) => {
     if (source.contentType === 'video') {
+      if (sourceKind === 'video' && source.sourceId === bookId && source.startSeconds !== null && onJumpToTimestamp) {
+        onJumpToTimestamp(source.startSeconds);
+        return;
+      }
+
       const nextParams = new URLSearchParams();
       if (source.startSeconds !== null) {
         nextParams.set('t', String(Math.floor(source.startSeconds)));
@@ -443,7 +460,7 @@ export function BookAskAIPanel({
     }
 
     if (source.sourceId === bookId) {
-      if (source.pageNumber) {
+      if (sourceKind === 'pdf' && source.pageNumber && onJumpToPage) {
         onJumpToPage(source.pageNumber);
       }
       return;

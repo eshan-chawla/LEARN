@@ -662,21 +662,15 @@ export default function BookViewerPage() {
       <header className="z-30 flex-shrink-0 border-b border-stone-200/80 bg-[rgba(248,244,238,0.92)] backdrop-blur-xl">
         <div className="flex items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setSidebarOpen((current) => !current)}
+            <Link
+              href={`/dashboard/class/${bookResponse.classSlug || slug}?tab=books`}
               className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-stone-200 bg-white/80 text-stone-700 shadow-[0_12px_30px_rgba(28,25,23,0.08)] transition hover:border-stone-300 hover:bg-white"
-              aria-label={sidebarOpen ? 'Collapse navigator' : 'Open navigator'}
-              title={sidebarOpen ? 'Collapse navigator' : 'Open navigator'}
+              title="Back to books"
             >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {sidebarOpen ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M15 19l-7-7 7-7" />
-                ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M4 7h16M4 12h16M4 17h16" />
-                )}
+              <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M15 19l-7-7 7-7" />
               </svg>
-            </button>
+            </Link>
             <div className="min-w-0">
               <div className="inline-flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">
                 <Link href="/dashboard" className="transition hover:text-stone-700">
@@ -745,6 +739,22 @@ export default function BookViewerPage() {
       </header>
 
       <div ref={layoutRef} className="relative flex min-h-0 flex-1 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setSidebarOpen((current) => !current)}
+          className="absolute left-0 top-1/2 z-30 inline-flex h-14 w-8 -translate-y-1/2 items-center justify-center rounded-r-2xl border border-l-0 border-stone-200 bg-white/92 text-stone-700 shadow-[0_12px_30px_rgba(28,25,23,0.14)] transition hover:border-stone-300 hover:bg-white"
+          aria-label={sidebarOpen ? 'Collapse modules panel' : 'Open modules panel'}
+          title={sidebarOpen ? 'Collapse modules panel' : 'Open modules panel'}
+        >
+          <svg className="h-4.5 w-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {sidebarOpen ? (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M15 19l-7-7 7-7" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M9 5l7 7-7 7" />
+            )}
+          </svg>
+        </button>
+
         {isAiPanelResizing && (
           <div
             className="absolute inset-0 z-10 hidden cursor-col-resize md:block"
