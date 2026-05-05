@@ -3,7 +3,7 @@
 import { ProfileMenu } from '@/components/ProfileMenu';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter, useParams, useSearchParams } from 'next/navigation';
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type DragEvent as ReactDragEvent, type ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
 import { formatDate } from '@/lib/utils';
 import { PdfUploadModal } from '@/components/PdfUploadModal';
@@ -1463,6 +1463,31 @@ export default function ClassPage() {
       aria-hidden="true"
     />
   );
+  const handleBookDragStart = (
+    event: ReactDragEvent<HTMLElement>,
+    book: Book,
+    sectionId: string | null
+  ) => {
+    if (!canEditClass) return;
+
+    const nextDraggedBook = { bookId: book.id, fromSectionId: sectionId };
+    draggedBookRef.current = nextDraggedBook;
+    setDraggedBook(nextDraggedBook);
+    setBookDropTarget({ sectionId, targetBookId: book.id, placement: 'before' });
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', book.id);
+  };
+  const handleSectionDragStart = (
+    event: ReactDragEvent<HTMLElement>,
+    sectionId: string
+  ) => {
+    if (!canEditClass) return;
+
+    setDraggedSectionId(sectionId);
+    setSectionDropTarget({ sectionId, placement: 'before' });
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', sectionId);
+  };
 
   const renderBookCards = (sectionId: string | null, sectionBooks: Book[]) => {
     const isEmptyDropTarget = bookDropTarget?.sectionId === sectionId && bookDropTarget.targetBookId === null;
@@ -1534,14 +1559,7 @@ export default function ClassPage() {
               renderDropIndicator()}
             <div
               draggable={canEditClass}
-              onDragStart={(event) => {
-                if (!canEditClass) return;
-                const nextDraggedBook = { bookId: book.id, fromSectionId: sectionId };
-                draggedBookRef.current = nextDraggedBook;
-                setDraggedBook(nextDraggedBook);
-                setBookDropTarget({ sectionId, targetBookId: book.id, placement: 'before' });
-                event.dataTransfer.effectAllowed = 'move';
-              }}
+              onDragStart={(event) => handleBookDragStart(event, book, sectionId)}
               onDragEnd={() => {
                 draggedBookRef.current = null;
                 setDraggedBook(null);
@@ -1570,7 +1588,14 @@ export default function ClassPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start gap-3">
                     {canEditClass && (
-                      <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-500 shadow-sm">
+                      <div
+                        draggable
+                        onDragStart={(event) => {
+                          event.stopPropagation();
+                          handleBookDragStart(event, book, sectionId);
+                        }}
+                        className="inline-flex select-none items-center gap-2 rounded-full border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs font-medium text-stone-500 shadow-sm"
+                      >
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h.01M8 12h.01M8 17h.01M16 7h.01M16 12h.01M16 17h.01" />
                         </svg>
@@ -1983,12 +2008,7 @@ export default function ClassPage() {
                         {sectionDropTarget?.sectionId === section.id && sectionDropTarget.placement === 'before' && renderSectionDropIndicator()}
                       <section
                         draggable={canEditClass}
-                        onDragStart={(event) => {
-                          if (!canEditClass) return;
-                          setDraggedSectionId(section.id);
-                          setSectionDropTarget({ sectionId: section.id, placement: 'before' });
-                          event.dataTransfer.effectAllowed = 'move';
-                        }}
+                        onDragStart={(event) => handleSectionDragStart(event, section.id)}
                         onDragEnd={() => {
                           setDraggedSectionId(null);
                           setSectionDropTarget(null);
@@ -2015,7 +2035,14 @@ export default function ClassPage() {
                             <div className="min-w-0">
                               <div className="flex items-center gap-3">
                                 {canEditClass && (
-                                  <div className="inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white/90 px-2.5 py-1 text-xs font-medium text-stone-500 shadow-sm">
+                                  <div
+                                    draggable
+                                    onDragStart={(event) => {
+                                      event.stopPropagation();
+                                      handleSectionDragStart(event, section.id);
+                                    }}
+                                    className="inline-flex select-none items-center gap-2 rounded-full border border-stone-200 bg-white/90 px-2.5 py-1 text-xs font-medium text-stone-500 shadow-sm"
+                                  >
                                     <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h.01M8 12h.01M8 17h.01M16 7h.01M16 12h.01M16 17h.01" />
                                     </svg>
