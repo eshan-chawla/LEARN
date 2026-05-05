@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  formatWebSearchContext,
+  searchDuckDuckGoContext,
+  type WebSearchResult,
+} from '@/lib/ask-ai/duckduckgo';
 import { buildAskAiGuardrailPrompt } from '@/lib/ask-ai/guardrails';
+import {
+  DEFAULT_ASK_AI_GEMINI_MODEL,
+  normalizeAskAiGeminiModel,
+  type AskAiGeminiModel,
+} from '@/lib/ask-ai/models';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 type ChatRole = 'user' | 'assistant';
-type ResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos';
+type ResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos' | 'includeWebData';
 
 interface ChatMessage {
   role: ChatRole;
@@ -23,6 +33,18 @@ interface RetrievalHit {
   chunkIndex: number | null;
   startSeconds: number | null;
   endSeconds: number | null;
+}
+
+interface AskAiSource {
+  pageNumber: number | null;
+  excerpt: string;
+  score: number;
+  sourceId: string;
+  contentType: 'pdf' | 'video' | 'web';
+  title: string | null;
+  startSeconds: number | null;
+  endSeconds: number | null;
+  url?: string;
 }
 
 interface RetrievalTarget {
@@ -111,6 +133,11 @@ function normalizeResourceScopes(value: unknown): Set<ResourceScope> {
 
     if (candidate === 'includeVideos' || candidate === 'entireClassContent') {
       scopes.add('includeVideos');
+      continue;
+    }
+
+    if (candidate === 'includeWebData' || candidate === 'webData') {
+      scopes.add('includeWebData');
     }
   }
 
@@ -162,10 +189,10 @@ function buildContext(hits: RetrievalHit[], recordingTitle: string) {
     .join('\n\n---\n\n');
 }
 
-function buildSources(hits: RetrievalHit[]) {
+function buildSources(hits: RetrievalHit[], webResults: WebSearchResult[] = []): AskAiSource[] {
   const seen = new Set<string>();
 
-  return hits
+  const uploadedSources = hits
     .filter((hit) => {
       const key = [
         hit.contentType,
@@ -191,6 +218,20 @@ function buildSources(hits: RetrievalHit[]) {
       startSeconds: hit.startSeconds,
       endSeconds: hit.endSeconds,
     }));
+
+  const webSources = webResults.slice(0, 4).map((result) => ({
+    pageNumber: null,
+    excerpt: result.snippet.length > 240 ? `${result.snippet.slice(0, 237).trimEnd()}...` : result.snippet,
+    score: 0,
+    sourceId: result.url,
+    contentType: 'web' as const,
+    title: result.title,
+    startSeconds: null,
+    endSeconds: null,
+    url: result.url,
+  }));
+
+  return [...uploadedSources, ...webSources];
 }
 
 function describeResourceScope(scopes: Set<ResourceScope>, recordingTitle: string) {
@@ -280,9 +321,8 @@ function mergeRetrievalHits(hitGroups: RetrievalHit[][], limit = 8) {
     .slice(0, limit);
 }
 
-async function callGemini(prompt: string) {
+async function callGemini(prompt: string, model: AskAiGeminiModel) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_CHAT_MODEL || 'gemini-2.5-flash-lite';
 
   if (!apiKey) {
     throw new Error('Missing GEMINI_API_KEY on the server');
@@ -361,6 +401,12 @@ export async function POST(
           : 'Current recording';
     const messages = normalizeMessages(body.messages);
     const resourceScopes = normalizeResourceScopes(body.resourceScopes);
+    const includeWebData = resourceScopes.has('includeWebData');
+    const defaultModel = normalizeAskAiGeminiModel(
+      process.env.GEMINI_CHAT_MODEL,
+      DEFAULT_ASK_AI_GEMINI_MODEL
+    );
+    const selectedModel = normalizeAskAiGeminiModel(body.model, defaultModel);
 
     if (!classId) {
       return NextResponse.json({ error: 'Missing required field: classId' }, { status: 400 });
@@ -375,35 +421,40 @@ export async function POST(
       latestUserMessage.content
     );
 
-    const retrievalPayloads = await Promise.all(
-      retrievalTargets.map(async (target) => {
-        const retrievalResponse = await fetch(target.url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: authHeader,
-          },
-          body: JSON.stringify(target.body),
-          cache: 'no-store',
-        });
+    const [retrievalPayloads, webResults] = await Promise.all([
+      Promise.all(
+        retrievalTargets.map(async (target) => {
+          const retrievalResponse = await fetch(target.url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: authHeader,
+            },
+            body: JSON.stringify(target.body),
+            cache: 'no-store',
+          });
 
-        const retrievalPayload = await retrievalResponse.json().catch(() => null) as
-          | { hits?: RetrievalHit[]; error?: string }
-          | null;
+          const retrievalPayload = await retrievalResponse.json().catch(() => null) as
+            | { hits?: RetrievalHit[]; error?: string }
+            | null;
 
-        if (!retrievalResponse.ok) {
-          throw new Error(retrievalPayload?.error || 'Failed to search the selected resources');
-        }
+          if (!retrievalResponse.ok) {
+            throw new Error(retrievalPayload?.error || 'Failed to search the selected resources');
+          }
 
-        return Array.isArray(retrievalPayload?.hits) ? retrievalPayload.hits : [];
-      })
-    );
+          return Array.isArray(retrievalPayload?.hits) ? retrievalPayload.hits : [];
+        })
+      ),
+      includeWebData ? searchDuckDuckGoContext(latestUserMessage.content) : Promise.resolve([]),
+    ]);
 
     const hits = mergeRetrievalHits(retrievalPayloads);
-    if (hits.length === 0) {
+    if (hits.length === 0 && webResults.length === 0) {
       return NextResponse.json({
         answer:
-          'I could not find matching passages in the selected resources for that question. Try asking with a more specific term, topic, or timestamp reference.',
+          includeWebData
+            ? 'I could not find matching passages in the selected resources or web data for that question. Try asking with a more specific term, topic, or timestamp reference.'
+            : 'I could not find matching passages in the selected resources for that question. Try asking with a more specific term, topic, or timestamp reference.',
         sources: [],
       });
     }
@@ -412,26 +463,35 @@ export async function POST(
 
     const prompt = [
       'You are Smart Learn AI inside a video viewer.',
-      buildAskAiGuardrailPrompt(resourceScopeLabel),
+      buildAskAiGuardrailPrompt(resourceScopeLabel, { includeWebData }),
       'Use short paragraphs. Use flat bullets only if they make the answer clearer.',
       '',
       `Current recording title: ${recordingTitle}`,
       `Resource scope: ${resourceScopeLabel}`,
+      `Web data: ${includeWebData ? 'Enabled by the student' : 'Disabled'}`,
+      `Gemini model: ${selectedModel}`,
       '',
       'Recent conversation:',
       summarizeConversation(messages),
       '',
       'Retrieved excerpts from the selected resources:',
-      buildContext(hits, recordingTitle),
+      hits.length > 0 ? buildContext(hits, recordingTitle) : 'No matching uploaded excerpts were found.',
+      ...(includeWebData
+        ? [
+            '',
+            'DuckDuckGo web context:',
+            webResults.length > 0 ? formatWebSearchContext(webResults) : 'No DuckDuckGo web context was found.',
+          ]
+        : []),
       '',
       `Student's latest question: ${latestUserMessage.content}`,
     ].join('\n');
 
-    const answer = await callGemini(prompt);
+    const answer = await callGemini(prompt, selectedModel);
 
     return NextResponse.json({
       answer,
-      sources: buildSources(hits),
+      sources: buildSources(hits, includeWebData ? webResults : []),
     });
   } catch (error: unknown) {
     const message = getErrorMessage(error, 'Failed to answer this question');

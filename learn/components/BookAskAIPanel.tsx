@@ -1,22 +1,30 @@
 'use client';
 
+import {
+  ASK_AI_GEMINI_MODELS,
+  DEFAULT_ASK_AI_GEMINI_MODEL,
+  getAskAiGeminiModelLabel,
+  normalizeAskAiGeminiModel,
+  type AskAiGeminiModel,
+} from '@/lib/ask-ai/models';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 
 type ChatRole = 'user' | 'assistant';
-type AskAiResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos';
-type CitationTab = 'pdf' | 'video';
+type AskAiResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos' | 'includeWebData';
+type CitationTab = 'pdf' | 'video' | 'web';
 
 interface ChatSource {
   pageNumber: number | null;
   excerpt: string;
   score: number;
   sourceId: string;
-  contentType: 'pdf' | 'video';
+  contentType: 'pdf' | 'video' | 'web';
   title: string | null;
   startSeconds: number | null;
   endSeconds: number | null;
+  url?: string;
 }
 
 interface ChatMessage {
@@ -30,6 +38,7 @@ interface ResourceScopeState {
   entireModule: boolean;
   allBooks: boolean;
   includeVideos: boolean;
+  includeWebData: boolean;
 }
 
 interface PdfSourceMeta {
@@ -96,7 +105,9 @@ function formatTimecode(value: number | null) {
 }
 
 function getDefaultCitationTab(sources: ChatSource[]): CitationTab {
-  return sources.some((source) => source.contentType === 'pdf') ? 'pdf' : 'video';
+  if (sources.some((source) => source.contentType === 'pdf')) return 'pdf';
+  if (sources.some((source) => source.contentType === 'video')) return 'video';
+  return 'web';
 }
 
 function getScopeSummary(
@@ -105,18 +116,19 @@ function getScopeSummary(
   sourceKind: 'pdf' | 'video'
 ) {
   const currentSourceLabel = sourceKind === 'video' ? 'Current video' : 'Current book';
+  const webSuffix = resourceScopes.includeWebData ? ' + web' : '';
 
   if (resourceScopes.allBooks && resourceScopes.includeVideos) {
-    return `${currentSourceLabel} + all books + videos`;
+    return `${currentSourceLabel} + all books + videos${webSuffix}`;
   }
 
-  if (resourceScopes.allBooks) return `${currentSourceLabel} + all books`;
+  if (resourceScopes.allBooks) return `${currentSourceLabel} + all books${webSuffix}`;
   if (resourceScopes.entireModule && resourceScopes.includeVideos && hasModuleScope) {
-    return `${currentSourceLabel} + module + videos`;
+    return `${currentSourceLabel} + module + videos${webSuffix}`;
   }
-  if (resourceScopes.includeVideos) return `${currentSourceLabel} + videos`;
-  if (resourceScopes.entireModule && hasModuleScope) return `${currentSourceLabel} + module`;
-  return currentSourceLabel;
+  if (resourceScopes.includeVideos) return `${currentSourceLabel} + videos${webSuffix}`;
+  if (resourceScopes.entireModule && hasModuleScope) return `${currentSourceLabel} + module${webSuffix}`;
+  return `${currentSourceLabel}${webSuffix}`;
 }
 
 function normalizeResourceScopeState(value: unknown): ResourceScopeState {
@@ -125,6 +137,7 @@ function normalizeResourceScopeState(value: unknown): ResourceScopeState {
       entireModule: false,
       allBooks: false,
       includeVideos: false,
+      includeWebData: false,
     };
   }
 
@@ -138,6 +151,8 @@ function normalizeResourceScopeState(value: unknown): ResourceScopeState {
       (value as { includeVideos?: unknown; entireClassContent?: unknown }).includeVideos ??
         (value as { includeVideos?: unknown; entireClassContent?: unknown }).entireClassContent
     ),
+    includeWebData: Boolean((value as { includeWebData?: unknown; webData?: unknown }).includeWebData ??
+      (value as { includeWebData?: unknown; webData?: unknown }).webData),
   };
 }
 
@@ -164,9 +179,13 @@ function normalizeMessages(value: unknown): ChatMessage[] {
               if (!source || typeof source !== 'object') return null;
 
               const contentType =
-                (source as { contentType?: unknown }).contentType === 'video' ? 'video' : 'pdf';
+                (source as { contentType?: unknown }).contentType === 'web'
+                  ? 'web'
+                  : (source as { contentType?: unknown }).contentType === 'video'
+                    ? 'video'
+                    : 'pdf';
 
-              return {
+              const nextSource: ChatSource = {
                 pageNumber: typeof (source as { pageNumber?: unknown }).pageNumber === 'number'
                   ? (source as { pageNumber: number }).pageNumber
                   : null,
@@ -189,7 +208,13 @@ function normalizeMessages(value: unknown): ChatMessage[] {
                 endSeconds: typeof (source as { endSeconds?: unknown }).endSeconds === 'number'
                   ? (source as { endSeconds: number }).endSeconds
                   : null,
-              } satisfies ChatSource;
+              };
+
+              if (typeof (source as { url?: unknown }).url === 'string') {
+                nextSource.url = (source as { url: string }).url;
+              }
+
+              return nextSource;
             })
             .filter((source): source is ChatSource => source !== null)
         : undefined;
@@ -240,10 +265,12 @@ export function BookAskAIPanel({
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
   const [citationTabs, setCitationTabs] = useState<Record<string, CitationTab>>({});
   const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<AskAiGeminiModel>(DEFAULT_ASK_AI_GEMINI_MODEL);
   const [resourceScopes, setResourceScopes] = useState<ResourceScopeState>({
     entireModule: false,
     allBooks: false,
     includeVideos: false,
+    includeWebData: false,
   });
   const [historyReady, setHistoryReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -270,10 +297,12 @@ export function BookAskAIPanel({
     if (!storedValue) {
       setMessages([]);
       setInput('');
+      setSelectedModel(DEFAULT_ASK_AI_GEMINI_MODEL);
       setResourceScopes({
         entireModule: false,
         allBooks: false,
         includeVideos: false,
+        includeWebData: false,
       });
       setHistoryReady(true);
       return;
@@ -284,18 +313,23 @@ export function BookAskAIPanel({
         messages?: unknown;
         input?: unknown;
         resourceScopes?: unknown;
+        selectedModel?: unknown;
+        model?: unknown;
       };
 
       setMessages(normalizeMessages(parsed.messages));
       setInput(typeof parsed.input === 'string' ? parsed.input : '');
       setResourceScopes(normalizeResourceScopeState(parsed.resourceScopes));
+      setSelectedModel(normalizeAskAiGeminiModel(parsed.selectedModel ?? parsed.model));
     } catch {
       setMessages([]);
       setInput('');
+      setSelectedModel(DEFAULT_ASK_AI_GEMINI_MODEL);
       setResourceScopes({
         entireModule: false,
         allBooks: false,
         includeVideos: false,
+        includeWebData: false,
       });
     } finally {
       setHistoryReady(true);
@@ -311,9 +345,10 @@ export function BookAskAIPanel({
         messages,
         input,
         resourceScopes,
+        selectedModel,
       })
     );
-  }, [historyReady, input, messages, resourceScopes, storageKey]);
+  }, [historyReady, input, messages, resourceScopes, selectedModel, storageKey]);
 
   useEffect(() => {
     if (!historyReady) return;
@@ -390,12 +425,14 @@ export function BookAskAIPanel({
         body: JSON.stringify({
           classId,
           bookTitle,
+          model: selectedModel,
           moduleBookIds,
           resourceScopes: [
             'currentBook',
             ...(hasModuleScope && resourceScopes.entireModule ? (['entireModule'] as const) : []),
             ...(resourceScopes.allBooks ? (['allBooks'] as const) : []),
             ...(resourceScopes.includeVideos ? (['includeVideos'] as const) : []),
+            ...(resourceScopes.includeWebData ? (['includeWebData'] as const) : []),
           ],
           messages: nextMessages.map((message) => ({
             role: message.role,
@@ -441,6 +478,10 @@ export function BookAskAIPanel({
     '--ask-ai-width': `${desktopWidth}px`,
   } as CSSProperties;
 
+  const handleModelChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    setSelectedModel(normalizeAskAiGeminiModel(event.target.value));
+  };
+
   const getPdfSourceLabel = (source: ChatSource) => {
     const metadata = pdfSourceMeta[source.sourceId];
     const sourceTitle = metadata?.title || source.title || 'Book source';
@@ -453,6 +494,14 @@ export function BookAskAIPanel({
   };
 
   const handleSourceClick = (source: ChatSource) => {
+    if (source.contentType === 'web') {
+      const url = source.url || source.sourceId;
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+      return;
+    }
+
     if (source.contentType === 'video') {
       if (sourceKind === 'video' && source.sourceId === bookId && source.startSeconds !== null && onJumpToTimestamp) {
         onJumpToTimestamp(source.startSeconds);
@@ -509,112 +558,136 @@ export function BookAskAIPanel({
       )}
 
       <div className="flex items-center justify-between gap-3 border-b border-stone-200/80 px-4 py-4">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">Ask AI</p>
-          <div ref={resourceMenuRef} className="relative mt-2">
-            <button
-              type="button"
-              onClick={() => setResourceMenuOpen((current) => !current)}
-              className="flex min-w-[13.5rem] items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white/85 px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-white"
-              aria-haspopup="menu"
-              aria-expanded={resourceMenuOpen}
-            >
-              <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">Resources</p>
-                <p className="mt-1 truncate text-sm text-stone-600">{selectedScopeSummary}</p>
-              </div>
-              <svg
-                className={`h-4 w-4 flex-shrink-0 text-stone-500 transition-transform ${resourceMenuOpen ? 'rotate-180' : 'rotate-0'}`}
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
+          <div className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_8.5rem] items-start gap-2 max-[420px]:grid-cols-1">
+            <div ref={resourceMenuRef} className={`relative min-w-0 ${resourceMenuOpen ? 'z-50' : 'z-10'}`}>
+              <button
+                type="button"
+                onClick={() => setResourceMenuOpen((current) => !current)}
+                className="flex h-full min-h-[4.05rem] w-full items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white/85 px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-white"
+                aria-haspopup="menu"
+                aria-expanded={resourceMenuOpen}
               >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-
-            {resourceMenuOpen && (
-              <div className="absolute left-0 top-full z-30 mt-2 w-[18rem] rounded-[24px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-2 shadow-[0_24px_60px_rgba(28,25,23,0.16)]">
-                <div className="space-y-1">
-                  {([
-                    {
-                      key: 'entireModule',
-                      label: 'Include Entire Module',
-                      description: hasModuleScope
-                        ? 'Search across the other books in this module too.'
-                        : 'Unavailable because this book is not inside a module.',
-                      disabled: !hasModuleScope,
-                    },
-                    {
-                      key: 'allBooks',
-                      label: 'Include All Books',
-                      description: 'Search across every book in this class.',
-                      disabled: false,
-                    },
-                    {
-                      key: 'includeVideos',
-                      label: 'Include Videos',
-                      description: 'Add indexed class recordings to the search.',
-                      disabled: false,
-                    },
-                  ] as const).map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      disabled={option.disabled}
-                      onClick={() => {
-                        if (option.disabled) return;
-                        setResourceScopes((current) => {
-                          const nextValue = !current[option.key];
-
-                          if (option.key === 'entireModule') {
-                            return {
-                              ...current,
-                              entireModule: nextValue,
-                              allBooks: hasModuleScope && !nextValue ? false : current.allBooks,
-                            };
-                          }
-
-                          if (option.key === 'allBooks') {
-                            return {
-                              ...current,
-                              allBooks: nextValue,
-                              entireModule:
-                                nextValue && hasModuleScope ? true : current.entireModule,
-                            };
-                          }
-
-                          return {
-                            ...current,
-                            includeVideos: nextValue,
-                          };
-                        });
-                      }}
-                      className="flex w-full items-start gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-stone-100/80 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-stone-800">{option.label}</p>
-                        <p className="mt-0.5 text-xs leading-5 text-stone-500">{option.description}</p>
-                      </div>
-                      <span
-                        className={`mt-1 inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border px-0.5 transition ${
-                          resourceScopes[option.key]
-                            ? 'border-stone-900 bg-stone-900'
-                            : 'border-stone-300 bg-white'
-                        }`}
-                        aria-hidden="true"
-                      >
-                        <span
-                          className={`h-4 w-4 rounded-full bg-white shadow-[0_2px_6px_rgba(28,25,23,0.16)] transition-transform ${
-                            resourceScopes[option.key] ? 'translate-x-5' : 'translate-x-0'
-                          }`}
-                        />
-                      </span>
-                    </button>
-                  ))}
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">Resources</p>
+                  <p className="mt-1 truncate text-sm text-stone-600">{selectedScopeSummary}</p>
                 </div>
-              </div>
-            )}
+                <svg
+                  className={`h-4 w-4 flex-shrink-0 text-stone-500 transition-transform ${resourceMenuOpen ? 'rotate-180' : 'rotate-0'}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
+
+              {resourceMenuOpen && (
+                <div className="absolute left-0 top-full z-50 mt-2 w-[min(18rem,calc(100vw-2rem))] rounded-[24px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-2 shadow-[0_24px_60px_rgba(28,25,23,0.16)]">
+                  <div className="space-y-1">
+                    {([
+                      {
+                        key: 'entireModule',
+                        label: 'Include Entire Module',
+                        disabled: !hasModuleScope,
+                      },
+                      {
+                        key: 'allBooks',
+                        label: 'Include All Books',
+                        disabled: false,
+                      },
+                      {
+                        key: 'includeVideos',
+                        label: 'Include Videos',
+                        disabled: false,
+                      },
+                      {
+                        key: 'includeWebData',
+                        label: 'Include Web Data',
+                        disabled: false,
+                      },
+                    ] as const).map((option) => (
+                      <button
+                        key={option.key}
+                        type="button"
+                        disabled={option.disabled}
+                        onClick={() => {
+                          if (option.disabled) return;
+                          setResourceScopes((current) => {
+                            const nextValue = !current[option.key];
+
+                            if (option.key === 'entireModule') {
+                              return {
+                                ...current,
+                                entireModule: nextValue,
+                                allBooks: hasModuleScope && !nextValue ? false : current.allBooks,
+                              };
+                            }
+
+                            if (option.key === 'allBooks') {
+                              return {
+                                ...current,
+                                allBooks: nextValue,
+                                entireModule:
+                                  nextValue && hasModuleScope ? true : current.entireModule,
+                              };
+                            }
+
+                            return {
+                              ...current,
+                              [option.key]: nextValue,
+                            };
+                          });
+                        }}
+                        className="flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-stone-100/80 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-stone-800">{option.label}</p>
+                        </div>
+                        <span
+                          className={`ml-auto inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border px-0.5 transition ${
+                            resourceScopes[option.key]
+                              ? 'border-stone-900 bg-stone-900'
+                              : 'border-stone-300 bg-white'
+                          }`}
+                          aria-hidden="true"
+                        >
+                          <span
+                            className={`h-4 w-4 rounded-full bg-white shadow-[0_2px_6px_rgba(28,25,23,0.16)] transition-transform ${
+                              resourceScopes[option.key] ? 'translate-x-5' : 'translate-x-0'
+                            }`}
+                          />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <label className="relative z-0 block min-w-0 rounded-2xl border border-stone-200 bg-white/85 px-3 py-2.5 transition hover:border-stone-300 hover:bg-white focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100">
+              <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">
+                Model
+              </span>
+              <select
+                value={selectedModel}
+                onChange={handleModelChange}
+                className="mt-1 w-full appearance-none bg-transparent pr-6 text-sm text-stone-600 outline-none"
+                title={`Gemini model: ${getAskAiGeminiModelLabel(selectedModel)}`}
+              >
+                {ASK_AI_GEMINI_MODELS.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.label}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute right-3 top-1/2 mt-1 -translate-y-1/2 text-stone-500">
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M6 9l6 6 6-6" />
+                </svg>
+              </span>
+            </label>
           </div>
         </div>
         <button
@@ -635,18 +708,26 @@ export function BookAskAIPanel({
             const messageSources = message.sources || [];
             const pdfSources = messageSources.filter((source) => source.contentType === 'pdf');
             const videoSources = messageSources.filter((source) => source.contentType === 'video');
-            const showCitationTabs = sourceKind === 'pdf' && messageSources.length > 0;
+            const webSources = messageSources.filter((source) => source.contentType === 'web');
+            const citationOptions = [
+              { key: 'pdf' as const, count: pdfSources.length, label: 'Book citations' },
+              { key: 'video' as const, count: videoSources.length, label: 'Video citations' },
+              { key: 'web' as const, count: webSources.length, label: 'Web sources' },
+            ].filter((option) => option.count > 0);
+            const showCitationTabs = citationOptions.length > 1;
             const preferredCitationTab = citationTabs[message.id];
             const activeCitationTab = showCitationTabs
-              ? preferredCitationTab === 'video'
-                ? (videoSources.length > 0 ? 'video' : 'pdf')
-                : (pdfSources.length > 0 ? 'pdf' : 'video')
+              ? citationOptions.some((option) => option.key === preferredCitationTab)
+                ? preferredCitationTab
+                : citationOptions[0]?.key ?? 'pdf'
               : null;
             const visibleSources =
               activeCitationTab === 'pdf'
                 ? pdfSources
                 : activeCitationTab === 'video'
                   ? videoSources
+                  : activeCitationTab === 'web'
+                    ? webSources
                   : messageSources;
 
             return (
@@ -666,10 +747,7 @@ export function BookAskAIPanel({
                     <div className="flex items-center justify-start gap-2">
                       {showCitationTabs ? (
                         <>
-                          {([
-                            { key: 'pdf', count: pdfSources.length, label: 'Book citations' },
-                            { key: 'video', count: videoSources.length, label: 'Video citations' },
-                          ] as const).map((citationType) => {
+                          {citationOptions.map((citationType) => {
                             const isActive = activeCitationTab === citationType.key && (expandedSources[message.id] ?? false);
 
                             return (
@@ -720,7 +798,7 @@ export function BookAskAIPanel({
                                       />
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14 3.75V8h4.25" />
                                     </svg>
-                                  ) : (
+                                  ) : citationType.key === 'video' ? (
                                     <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path
                                         strokeLinecap="round"
@@ -740,6 +818,16 @@ export function BookAskAIPanel({
                                         strokeWidth={1.8}
                                         d="m10.25 10.25-2.75 1.75 2.75 1.75v-3.5Z"
                                       />
+                                    </svg>
+                                  ) : (
+                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={1.8}
+                                        d="M12 20.25a8.25 8.25 0 1 0 0-16.5 8.25 8.25 0 0 0 0 16.5Z"
+                                      />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3.75 12h16.5M12 3.75c2.1 2.25 3.15 5 3.15 8.25S14.1 18 12 20.25C9.9 18 8.85 15.25 8.85 12S9.9 6 12 3.75Z" />
                                     </svg>
                                   )}
                                 </span>
@@ -791,7 +879,9 @@ export function BookAskAIPanel({
                         <div className="space-y-2 pt-1">
                           {visibleSources.map((source, index) => {
                             const canInteractWithSource =
-                              source.contentType === 'video'
+                              source.contentType === 'web'
+                                ? Boolean(source.url || source.sourceId)
+                                : source.contentType === 'video'
                                 ? true
                                 : source.contentType === 'pdf' &&
                                   (source.sourceId !== bookId || source.pageNumber !== null);
@@ -817,7 +907,9 @@ export function BookAskAIPanel({
                                   <div className="flex items-start justify-between gap-3">
                                     <div className="space-y-1">
                                       <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
-                                        {source.contentType === 'video'
+                                        {source.contentType === 'web'
+                                          ? 'Web source'
+                                          : source.contentType === 'video'
                                           ? videoTimeRange || 'Transcript excerpt'
                                           : source.pageNumber
                                           ? `Page ${source.pageNumber}`
@@ -826,14 +918,20 @@ export function BookAskAIPanel({
                                       <span className="block truncate text-sm font-medium text-stone-700">
                                         {source.contentType === 'pdf'
                                           ? getPdfSourceLabel(source)
-                                          : source.title || 'Class recording'}
+                                          : source.contentType === 'web'
+                                            ? source.title || 'DuckDuckGo result'
+                                            : source.title || 'Class recording'}
                                       </span>
                                       <span className="block text-[11px] font-medium text-stone-400">
-                                        Similarity {formatSimilarityScore(source.score)}
+                                        {source.contentType === 'web'
+                                          ? source.sourceId.replace(/^https?:\/\//, '').replace(/^www\./, '')
+                                          : `Similarity ${formatSimilarityScore(source.score)}`}
                                       </span>
                                     </div>
                                     <span className="pt-0.5 text-xs font-medium text-stone-400">
-                                      {source.contentType === 'video'
+                                      {source.contentType === 'web'
+                                        ? 'Open web'
+                                        : source.contentType === 'video'
                                         ? 'Open source'
                                         : source.contentType !== 'pdf'
                                           ? 'Preview only'
@@ -863,11 +961,11 @@ export function BookAskAIPanel({
 
           {sending && (
             <div className="mr-4 rounded-[24px] border border-stone-200 bg-white/85 px-4 py-3 text-sm text-stone-600 shadow-[0_12px_30px_rgba(28,25,23,0.06)]">
-              Thinking with the selected resources...
+              Thinking with the selected resources{resourceScopes.includeWebData ? ' and web data' : ''}...
             </div>
           )}
 
-          {!sending && messages.length === 1 && (
+          {!sending && messages.length === 0 && (
             <div className="rounded-[24px] border border-dashed border-stone-200 bg-white/65 px-4 py-5 text-sm leading-6 text-stone-500">
               Try asking for a definition, a summary of a concept, or where a topic is discussed in the selected resources.
             </div>
@@ -903,7 +1001,9 @@ export function BookAskAIPanel({
 
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs leading-5 text-stone-500">
-              Answers are grounded in retrieved passages from {selectedScopeSummary.toLowerCase()}.
+              {resourceScopes.includeWebData
+                ? 'Answers may use selected uploaded materials plus DuckDuckGo web context.'
+                : `Answers are grounded in retrieved passages from ${selectedScopeSummary.toLowerCase()}.`}
             </p>
             <button
               type="submit"
