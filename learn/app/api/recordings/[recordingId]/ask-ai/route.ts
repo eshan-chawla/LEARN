@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buildAskAiGuardrailPrompt } from '@/lib/ask-ai/guardrails';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
@@ -411,8 +412,7 @@ export async function POST(
 
     const prompt = [
       'You are Smart Learn AI inside a video viewer.',
-      'Answer the student using only the retrieved excerpts from the selected resources.',
-      'If the excerpts are not sufficient, say that clearly instead of guessing.',
+      buildAskAiGuardrailPrompt(resourceScopeLabel),
       'Use short paragraphs. Use flat bullets only if they make the answer clearer.',
       '',
       `Current recording title: ${recordingTitle}`,

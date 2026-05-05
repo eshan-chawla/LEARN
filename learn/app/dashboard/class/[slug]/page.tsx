@@ -1718,21 +1718,6 @@ export default function ClassPage() {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="space-y-6">
-          <section className="rounded-[28px] border border-stone-200 bg-white/80 px-6 py-7 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
-            <div className="flex items-start justify-between">
-              <div className="max-w-3xl">
-                <p className="text-sm font-semibold uppercase tracking-[0.22em] text-sky-700">Smart Learn Interior</p>
-                <h2 className="mt-3 text-4xl font-black tracking-tight text-slate-950">{classData.name}</h2>
-                {classData.description && (
-                  <p className="mt-3 text-base leading-7 text-stone-600">{classData.description}</p>
-                )}
-                <p className="mt-3 text-sm text-stone-500">
-                  Created {formatDate(classData.created_at)}
-                </p>
-              </div>
-            </div>
-          </section>
-
           <section className="rounded-[28px] border border-stone-200 bg-white/75 shadow-[0_20px_60px_rgba(15,23,42,0.06)] backdrop-blur">
           <div className="border-b border-stone-200/80 px-6 py-4">
             <nav className="flex flex-wrap gap-2" aria-label="Tabs">

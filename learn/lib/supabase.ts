@@ -1,4 +1,5 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createBrowserClient } from '@supabase/ssr';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
@@ -7,13 +8,24 @@ if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables');
 }
 
-// Default client without auth
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+let browserClient: SupabaseClient | null = null;
+
+function createPublicSupabaseClient(): SupabaseClient {
+  if (typeof window === 'undefined') {
+    return createClient(supabaseUrl, supabaseAnonKey);
+  }
+
+  browserClient ??= createBrowserClient(supabaseUrl, supabaseAnonKey);
+  return browserClient;
+}
+
+// Browser sessions need cookie-backed auth so the Next.js proxy can read them.
+export const supabase = createPublicSupabaseClient();
 
 // Create a Supabase client with custom JWT token (for custom auth integration)
 export function createSupabaseClient(accessToken?: string): SupabaseClient {
   if (!accessToken) {
-    return supabase;
+    return createPublicSupabaseClient();
   }
 
   return createClient(supabaseUrl, supabaseAnonKey, {

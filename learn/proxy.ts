@@ -1,87 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import type { CookieOptions } from '@supabase/ssr';
+import { isInvalidRefreshTokenError } from '@/lib/supabaseAuth';
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const publicPaths = ['/signin', '/signup', '/'];
+  const isPublicAsset = /\.[^/]+$/.test(pathname);
 
   // Allow API routes to be accessed
-  if (pathname.startsWith('/api') || pathname.startsWith('/_next') || pathname.startsWith('/favicon')) {
+  if (pathname.startsWith('/api') || pathname.startsWith('/_next') || pathname.startsWith('/favicon') || isPublicAsset) {
     return NextResponse.next();
   }
 
-  // Create a Supabase client for the server
-  let response = NextResponse.next({
-    request: {
-      headers: request.headers,
-    },
-  });
+  let response = NextResponse.next({ request });
+
+  const applyResponseCookies = (nextResponse: NextResponse) => {
+    for (const cookie of response.cookies.getAll()) {
+      nextResponse.cookies.set(cookie);
+    }
+
+    return nextResponse;
+  };
+
+  const redirectWithCookies = (pathnameToRedirect: string) =>
+    applyResponseCookies(NextResponse.redirect(new URL(pathnameToRedirect, request.url)));
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name: string) {
-          return request.cookies.get(name)?.value;
+        getAll() {
+          return request.cookies.getAll();
         },
-        set(name: string, value: string, options: CookieOptions) {
-          request.cookies.set({
-            name,
-            value,
-            ...options,
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value }) => {
+            request.cookies.set(name, value);
           });
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          });
-          response.cookies.set({
-            name,
-            value,
-            ...options,
-          });
-        },
-        remove(name: string, options: CookieOptions) {
-          request.cookies.set({
-            name,
-            value: '',
-            ...options,
-          });
-          response = NextResponse.next({
-            request: {
-              headers: request.headers,
-            },
-          });
-          response.cookies.set({
-            name,
-            value: '',
-            ...options,
+
+          response = NextResponse.next({ request });
+
+          cookiesToSet.forEach(({ name, value, options }) => {
+            response.cookies.set({
+              name,
+              value,
+              ...options,
+            });
           });
         },
       },
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+    error,
+  } = await supabase.auth.getUser();
+
+  if (error && isInvalidRefreshTokenError(error)) {
+    await supabase.auth.signOut({ scope: 'local' });
+  }
 
   if (user) {
     // If authenticated, redirect from public auth pages to dashboard
     if (publicPaths.includes(pathname) && pathname !== '/') {
-      return NextResponse.redirect(new URL('/dashboard', request.url));
+      return redirectWithCookies('/dashboard');
     }
   } else {
     // If not authenticated, allow access to public pages
     if (publicPaths.includes(pathname)) {
-      return response;
+      return applyResponseCookies(response);
     }
     // For any other protected route, redirect to sign-in
-    return NextResponse.redirect(new URL('/signin', request.url));
+    return redirectWithCookies('/signin');
   }
 
-  return response;
+  return applyResponseCookies(response);
 }
 
 export const config = {
@@ -92,6 +87,6 @@ export const config = {
      * - _next/image (image optimization files)
      * - favicon.ico (favicon file)
      */
-    '/((?!_next/static|_next/image|favicon.ico).)*',
+    '/((?!_next/static|_next/image|.*\\..*).*)',
   ],
 };

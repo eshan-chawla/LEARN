@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as Rea
 
 type ChatRole = 'user' | 'assistant';
 type AskAiResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos';
+type CitationTab = 'pdf' | 'video';
 
 interface ChatSource {
   pageNumber: number | null;
@@ -64,10 +65,12 @@ function createMessage(role: ChatRole, content: string, sources?: ChatSource[]):
   };
 }
 
-function createWelcomeMessage(bookTitle: string) {
-  return createMessage(
-    'assistant',
-    `Ask about ${bookTitle}. I will answer from the selected resources and point you to relevant sources when I can.`
+function isLegacyWelcomeMessage(message: ChatMessage) {
+  return (
+    message.role === 'assistant' &&
+    /^Ask about .+\. I will answer from the selected resources and point you to relevant sources when I can\.$/.test(
+      message.content
+    )
   );
 }
 
@@ -90,6 +93,10 @@ function formatTimecode(value: number | null) {
   }
 
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function getDefaultCitationTab(sources: ChatSource[]): CitationTab {
+  return sources.some((source) => source.contentType === 'pdf') ? 'pdf' : 'video';
 }
 
 function getScopeSummary(
@@ -134,9 +141,9 @@ function normalizeResourceScopeState(value: unknown): ResourceScopeState {
   };
 }
 
-function normalizeMessages(value: unknown, bookTitle: string): ChatMessage[] {
+function normalizeMessages(value: unknown): ChatMessage[] {
   if (!Array.isArray(value)) {
-    return [createWelcomeMessage(bookTitle)];
+    return [];
   }
 
   const normalized = value
@@ -201,9 +208,10 @@ function normalizeMessages(value: unknown, bookTitle: string): ChatMessage[] {
 
       return nextMessage;
     })
-    .filter((message): message is ChatMessage => message !== null);
+    .filter((message): message is ChatMessage => message !== null)
+    .filter((message) => !isLegacyWelcomeMessage(message));
 
-  return normalized.length > 0 ? normalized : [createWelcomeMessage(bookTitle)];
+  return normalized;
 }
 
 export function BookAskAIPanel({
@@ -225,11 +233,12 @@ export function BookAskAIPanel({
   onResizeStart,
 }: BookAskAIPanelProps) {
   const router = useRouter();
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [createWelcomeMessage(bookTitle)]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [citationTabs, setCitationTabs] = useState<Record<string, CitationTab>>({});
   const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
   const [resourceScopes, setResourceScopes] = useState<ResourceScopeState>({
     entireModule: false,
@@ -252,13 +261,14 @@ export function BookAskAIPanel({
     if (typeof window === 'undefined') return;
 
     setExpandedSources({});
+    setCitationTabs({});
     setError(null);
     setResourceMenuOpen(false);
 
     const storedValue = window.sessionStorage.getItem(storageKey);
 
     if (!storedValue) {
-      setMessages([createWelcomeMessage(bookTitle)]);
+      setMessages([]);
       setInput('');
       setResourceScopes({
         entireModule: false,
@@ -276,11 +286,11 @@ export function BookAskAIPanel({
         resourceScopes?: unknown;
       };
 
-      setMessages(normalizeMessages(parsed.messages, bookTitle));
+      setMessages(normalizeMessages(parsed.messages));
       setInput(typeof parsed.input === 'string' ? parsed.input : '');
       setResourceScopes(normalizeResourceScopeState(parsed.resourceScopes));
     } catch {
-      setMessages([createWelcomeMessage(bookTitle)]);
+      setMessages([]);
       setInput('');
       setResourceScopes({
         entireModule: false,
@@ -290,7 +300,7 @@ export function BookAskAIPanel({
     } finally {
       setHistoryReady(true);
     }
-  }, [bookTitle, storageKey]);
+  }, [storageKey]);
 
   useEffect(() => {
     if (!historyReady || typeof window === 'undefined') return;
@@ -413,6 +423,10 @@ export function BookAskAIPanel({
         setExpandedSources((current) => ({
           ...current,
           [assistantMessage.id]: false,
+        }));
+        setCitationTabs((current) => ({
+          ...current,
+          [assistantMessage.id]: getDefaultCitationTab(assistantMessage.sources || []),
         }));
       }
     } catch (submitError: unknown) {
@@ -617,124 +631,235 @@ export function BookAskAIPanel({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         <div className="space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={`rounded-[24px] px-4 py-3 ${message.role === 'user' ? 'ml-6 bg-stone-900 text-stone-50 shadow-[0_16px_30px_rgba(28,25,23,0.2)]' : 'mr-4 border border-stone-200 bg-white/85 text-stone-800 shadow-[0_12px_30px_rgba(28,25,23,0.06)]'}`}
-            >
-              <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${message.role === 'user' ? 'text-stone-300' : 'text-stone-500'}`}>
-                {message.role === 'user' ? 'You' : 'Smart Learn AI'}
-              </p>
-              <div className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${message.role === 'user' ? 'text-stone-50' : 'text-stone-700'}`}>
-                {message.content}
-              </div>
+          {messages.map((message) => {
+            const messageSources = message.sources || [];
+            const pdfSources = messageSources.filter((source) => source.contentType === 'pdf');
+            const videoSources = messageSources.filter((source) => source.contentType === 'video');
+            const showCitationTabs = sourceKind === 'pdf' && messageSources.length > 0;
+            const preferredCitationTab = citationTabs[message.id];
+            const activeCitationTab = showCitationTabs
+              ? preferredCitationTab === 'video'
+                ? (videoSources.length > 0 ? 'video' : 'pdf')
+                : (pdfSources.length > 0 ? 'pdf' : 'video')
+              : null;
+            const visibleSources =
+              activeCitationTab === 'pdf'
+                ? pdfSources
+                : activeCitationTab === 'video'
+                  ? videoSources
+                  : messageSources;
 
-              {message.sources && message.sources.length > 0 && (
-                <div className="mt-4 space-y-2">
-                  <div className="flex items-center justify-start">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExpandedSources((current) => ({
-                          ...current,
-                          [message.id]: !(current[message.id] ?? false),
-                        }));
-                      }}
-                      aria-expanded={expandedSources[message.id] ?? false}
-                      aria-label={`Show ${message.sources.length} source${message.sources.length === 1 ? '' : 's'}`}
-                      title={`${message.sources.length} source${message.sources.length === 1 ? '' : 's'}`}
-                      className="group inline-flex items-center gap-1.5 rounded-2xl border border-stone-200 bg-stone-50/80 px-2 py-1.5 text-stone-500 transition hover:border-stone-300 hover:bg-white hover:text-stone-700"
-                    >
-                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-500 transition group-hover:border-stone-300 group-hover:text-stone-700">
-                        <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={1.8}
-                            d="M14 3.75H7.5A1.75 1.75 0 0 0 5.75 5.5v13A1.75 1.75 0 0 0 7.5 20.25h9A1.75 1.75 0 0 0 18.25 18.5V8L14 3.75Z"
-                          />
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14 3.75V8h4.25" />
-                        </svg>
-                      </span>
-                      <span className="text-[10px] font-semibold tabular-nums text-stone-500 group-hover:text-stone-700">
-                        {message.sources.length}
-                      </span>
-                    </button>
-                  </div>
+            return (
+              <div
+                key={message.id}
+                className={`rounded-[24px] px-4 py-3 ${message.role === 'user' ? 'ml-6 bg-stone-900 text-stone-50 shadow-[0_16px_30px_rgba(28,25,23,0.2)]' : 'mr-4 border border-stone-200 bg-white/85 text-stone-800 shadow-[0_12px_30px_rgba(28,25,23,0.06)]'}`}
+              >
+                <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${message.role === 'user' ? 'text-stone-300' : 'text-stone-500'}`}>
+                  {message.role === 'user' ? 'You' : 'Smart Learn AI'}
+                </p>
+                <div className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${message.role === 'user' ? 'text-stone-50' : 'text-stone-700'}`}>
+                  {message.content}
+                </div>
 
-                  <div className={`grid transition-[grid-template-rows] duration-300 ${(expandedSources[message.id] ?? false) ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
-                    <div className="overflow-hidden">
-                      <div className="space-y-2 pt-1">
-                        {message.sources.map((source, index) => {
-                          const canInteractWithSource =
-                            source.contentType === 'video'
-                              ? true
-                              : source.contentType === 'pdf' &&
-                                (source.sourceId !== bookId || source.pageNumber !== null);
-                          const videoTimeRange =
-                            source.contentType === 'video'
-                              ? [formatTimecode(source.startSeconds), formatTimecode(source.endSeconds)]
-                                  .filter(Boolean)
-                                  .join(' - ')
-                              : null;
+                {messageSources.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-start gap-2">
+                      {showCitationTabs ? (
+                        <>
+                          {([
+                            { key: 'pdf', count: pdfSources.length, label: 'Book citations' },
+                            { key: 'video', count: videoSources.length, label: 'Video citations' },
+                          ] as const).map((citationType) => {
+                            const isActive = activeCitationTab === citationType.key && (expandedSources[message.id] ?? false);
 
-                          return (
-                            <div key={`${message.id}-${index}`} className="group relative">
+                            return (
                               <button
+                                key={citationType.key}
                                 type="button"
+                                disabled={citationType.count === 0}
+                                aria-pressed={isActive}
+                                aria-label={`${citationType.label} (${citationType.count})`}
+                                title={`${citationType.label} (${citationType.count})`}
                                 onClick={() => {
-                                  if (canInteractWithSource) {
-                                    handleSourceClick(source);
-                                  }
+                                  if (citationType.count === 0) return;
+
+                                  setCitationTabs((current) => ({
+                                    ...current,
+                                    [message.id]: citationType.key,
+                                  }));
+
+                                  setExpandedSources((current) => {
+                                    const isCurrentlyActive =
+                                      current[message.id] &&
+                                      activeCitationTab === citationType.key;
+
+                                    return {
+                                      ...current,
+                                      [message.id]: !isCurrentlyActive,
+                                    };
+                                  });
                                 }}
-                                className="w-full rounded-2xl border border-stone-200 bg-stone-50/80 px-3 py-3 text-left transition hover:border-stone-300 hover:bg-white disabled:cursor-default"
-                                disabled={!canInteractWithSource}
+                                className={`group inline-flex items-center gap-2 rounded-2xl border px-2.5 py-1.5 transition ${
+                                  isActive
+                                    ? 'border-stone-900 bg-stone-900 text-stone-50'
+                                    : 'border-stone-200 bg-stone-50/80 text-stone-500 hover:border-stone-300 hover:bg-white hover:text-stone-700 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100/80 disabled:text-stone-300'
+                                }`}
                               >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="space-y-1">
-                                    <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
+                                <span className={`inline-flex h-7 w-7 items-center justify-center rounded-xl border transition ${
+                                  isActive
+                                    ? 'border-stone-700 bg-stone-800 text-stone-50'
+                                    : 'border-stone-200 bg-white text-stone-500 group-hover:border-stone-300 group-hover:text-stone-700'
+                                }`}>
+                                  {citationType.key === 'pdf' ? (
+                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={1.8}
+                                        d="M14 3.75H7.5A1.75 1.75 0 0 0 5.75 5.5v13A1.75 1.75 0 0 0 7.5 20.25h9A1.75 1.75 0 0 0 18.25 18.5V8L14 3.75Z"
+                                      />
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14 3.75V8h4.25" />
+                                    </svg>
+                                  ) : (
+                                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={1.8}
+                                        d="M4.75 8A1.75 1.75 0 0 1 6.5 6.25h7A1.75 1.75 0 0 1 15.25 8v8A1.75 1.75 0 0 1 13.5 17.75h-7A1.75 1.75 0 0 1 4.75 16V8Z"
+                                      />
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={1.8}
+                                        d="m15.25 10 4-2.25v8.5l-4-2.25V10Z"
+                                      />
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={1.8}
+                                        d="m10.25 10.25-2.75 1.75 2.75 1.75v-3.5Z"
+                                      />
+                                    </svg>
+                                  )}
+                                </span>
+                                <span className={`inline-flex min-w-6 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                                  isActive
+                                    ? 'bg-stone-700 text-stone-100'
+                                    : 'bg-stone-200/80 text-stone-500'
+                                }`}>
+                                  {citationType.count}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setExpandedSources((current) => ({
+                              ...current,
+                              [message.id]: !(current[message.id] ?? false),
+                            }));
+                          }}
+                          aria-expanded={expandedSources[message.id] ?? false}
+                          aria-label={`Show ${messageSources.length} source${messageSources.length === 1 ? '' : 's'}`}
+                          title={`${messageSources.length} source${messageSources.length === 1 ? '' : 's'}`}
+                          className="group inline-flex items-center gap-1.5 rounded-2xl border border-stone-200 bg-stone-50/80 px-2 py-1.5 text-stone-500 transition hover:border-stone-300 hover:bg-white hover:text-stone-700"
+                        >
+                          <span className="inline-flex h-6 w-6 items-center justify-center rounded-lg border border-stone-200 bg-white text-stone-500 transition group-hover:border-stone-300 group-hover:text-stone-700">
+                            <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={1.8}
+                                d="M14 3.75H7.5A1.75 1.75 0 0 0 5.75 5.5v13A1.75 1.75 0 0 0 7.5 20.25h9A1.75 1.75 0 0 0 18.25 18.5V8L14 3.75Z"
+                              />
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M14 3.75V8h4.25" />
+                            </svg>
+                          </span>
+                          <span className="text-[10px] font-semibold tabular-nums text-stone-500 group-hover:text-stone-700">
+                            {messageSources.length}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+
+                    <div className={`grid transition-[grid-template-rows] duration-300 ${(expandedSources[message.id] ?? false) ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+                      <div className="overflow-hidden">
+                        <div className="space-y-2 pt-1">
+                          {visibleSources.map((source, index) => {
+                            const canInteractWithSource =
+                              source.contentType === 'video'
+                                ? true
+                                : source.contentType === 'pdf' &&
+                                  (source.sourceId !== bookId || source.pageNumber !== null);
+                            const videoTimeRange =
+                              source.contentType === 'video'
+                                ? [formatTimecode(source.startSeconds), formatTimecode(source.endSeconds)]
+                                    .filter(Boolean)
+                                    .join(' - ')
+                                : null;
+
+                            return (
+                              <div key={`${message.id}-${source.contentType}-${source.sourceId}-${index}`} className="group relative">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (canInteractWithSource) {
+                                      handleSourceClick(source);
+                                    }
+                                  }}
+                                  className="w-full rounded-2xl border border-stone-200 bg-stone-50/80 px-3 py-3 text-left transition hover:border-stone-300 hover:bg-white disabled:cursor-default"
+                                  disabled={!canInteractWithSource}
+                                >
+                                  <div className="flex items-start justify-between gap-3">
+                                    <div className="space-y-1">
+                                      <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
+                                        {source.contentType === 'video'
+                                          ? videoTimeRange || 'Transcript excerpt'
+                                          : source.pageNumber
+                                          ? `Page ${source.pageNumber}`
+                                          : 'Page unavailable'}
+                                      </span>
+                                      <span className="block truncate text-sm font-medium text-stone-700">
+                                        {source.contentType === 'pdf'
+                                          ? getPdfSourceLabel(source)
+                                          : source.title || 'Class recording'}
+                                      </span>
+                                      <span className="block text-[11px] font-medium text-stone-400">
+                                        Similarity {formatSimilarityScore(source.score)}
+                                      </span>
+                                    </div>
+                                    <span className="pt-0.5 text-xs font-medium text-stone-400">
                                       {source.contentType === 'video'
-                                        ? videoTimeRange || 'Transcript excerpt'
-                                        : source.pageNumber
-                                        ? `Page ${source.pageNumber}`
-                                        : 'Page unavailable'}
-                                    </span>
-                                    <span className="block truncate text-sm font-medium text-stone-700">
-                                      {source.contentType === 'pdf'
-                                        ? getPdfSourceLabel(source)
-                                        : source.title || 'Class recording'}
-                                    </span>
-                                    <span className="block text-[11px] font-medium text-stone-400">
-                                      Similarity {formatSimilarityScore(source.score)}
+                                        ? 'Open source'
+                                        : source.contentType !== 'pdf'
+                                          ? 'Preview only'
+                                        : source.sourceId !== bookId
+                                          ? 'Open source'
+                                          : source.pageNumber
+                                            ? 'Jump to page'
+                                            : 'Preview only'}
                                     </span>
                                   </div>
-                                  <span className="pt-0.5 text-xs font-medium text-stone-400">
-                                    {source.contentType === 'video'
-                                      ? 'Open source'
-                                      : source.contentType !== 'pdf'
-                                        ? 'Preview only'
-                                      : source.sourceId !== bookId
-                                        ? 'Open source'
-                                        : source.pageNumber
-                                          ? 'Jump to page'
-                                          : 'Preview only'}
-                                  </span>
-                                </div>
-                              </button>
+                                </button>
 
-                              <div className="pointer-events-none absolute left-3 right-3 top-full z-20 mt-2 hidden rounded-[20px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-4 text-sm leading-6 text-stone-600 opacity-0 shadow-[0_24px_60px_rgba(28,25,23,0.14)] transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100 md:block">
-                                {source.excerpt}
+                                <div className="pointer-events-none absolute left-3 right-3 top-full z-20 mt-2 hidden rounded-[20px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-4 text-sm leading-6 text-stone-600 opacity-0 shadow-[0_24px_60px_rgba(28,25,23,0.14)] transition duration-200 group-hover:opacity-100 group-focus-within:opacity-100 md:block">
+                                  {source.excerpt}
+                                </div>
                               </div>
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
 
           {sending && (
             <div className="mr-4 rounded-[24px] border border-stone-200 bg-white/85 px-4 py-3 text-sm text-stone-600 shadow-[0_12px_30px_rgba(28,25,23,0.06)]">
