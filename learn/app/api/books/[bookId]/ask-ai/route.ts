@@ -10,12 +10,19 @@ import {
   normalizeAskAiGeminiModel,
   type AskAiGeminiModel,
 } from '@/lib/ask-ai/models';
+import { buildClassStructuralContext } from '@/lib/ask-ai/structural';
 
 export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 type ChatRole = 'user' | 'assistant';
-type ResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos' | 'includeWebData';
+type ResourceScope =
+  | 'currentBook'
+  | 'entireModule'
+  | 'allBooks'
+  | 'includeVideos'
+  | 'includeWebData'
+  | 'includeStructuralData';
 
 interface ChatMessage {
   role: ChatRole;
@@ -40,7 +47,7 @@ interface AskAiSource {
   excerpt: string;
   score: number;
   sourceId: string;
-  contentType: 'pdf' | 'video' | 'web';
+  contentType: 'pdf' | 'video' | 'web' | 'structural';
   title: string | null;
   startSeconds: number | null;
   endSeconds: number | null;
@@ -138,6 +145,11 @@ function normalizeResourceScopes(value: unknown): Set<ResourceScope> {
 
     if (candidate === 'includeWebData' || candidate === 'webData') {
       scopes.add('includeWebData');
+      continue;
+    }
+
+    if (candidate === 'includeStructuralData' || candidate === 'structuralData') {
+      scopes.add('includeStructuralData');
     }
   }
 
@@ -189,7 +201,11 @@ function buildContext(hits: RetrievalHit[], bookTitle: string) {
     .join('\n\n---\n\n');
 }
 
-function buildSources(hits: RetrievalHit[], webResults: WebSearchResult[] = []): AskAiSource[] {
+function buildSources(
+  hits: RetrievalHit[],
+  webResults: WebSearchResult[] = [],
+  structuralSources: AskAiSource[] = []
+): AskAiSource[] {
   const seen = new Set<string>();
 
   const uploadedSources = hits
@@ -228,7 +244,7 @@ function buildSources(hits: RetrievalHit[], webResults: WebSearchResult[] = []):
     url: result.url,
   }));
 
-  return [...uploadedSources, ...webSources];
+  return [...uploadedSources, ...webSources, ...structuralSources];
 }
 
 function describeResourceScope(scopes: Set<ResourceScope>, bookTitle: string) {
@@ -417,6 +433,7 @@ export async function POST(
     const resourceScopes = normalizeResourceScopes(body.resourceScopes);
     const moduleBookIds = normalizeStringList(body.moduleBookIds);
     const includeWebData = resourceScopes.has('includeWebData');
+    const includeStructuralData = resourceScopes.has('includeStructuralData');
     const defaultModel = normalizeAskAiGeminiModel(
       process.env.GEMINI_CHAT_MODEL,
       DEFAULT_ASK_AI_GEMINI_MODEL
@@ -436,7 +453,7 @@ export async function POST(
       moduleBookIds,
       latestUserMessage.content
     );
-    const [retrievalPayloads, webResults] = await Promise.all([
+    const [retrievalPayloads, webResults, structuralResult] = await Promise.all([
       Promise.all(
         retrievalTargets.map(async (target) => {
           const retrievalResponse = await fetch(target.url, {
@@ -461,14 +478,17 @@ export async function POST(
         })
       ),
       includeWebData ? searchDuckDuckGoContext(latestUserMessage.content) : Promise.resolve([]),
+      includeStructuralData
+        ? buildClassStructuralContext(authHeader.slice('Bearer '.length).trim(), classId)
+        : Promise.resolve({ context: '', sources: [] }),
     ]);
 
     const hits = mergeRetrievalHits(retrievalPayloads);
-    if (hits.length === 0 && webResults.length === 0) {
+    if (hits.length === 0 && webResults.length === 0 && !structuralResult.context) {
       return NextResponse.json({
         answer:
-          includeWebData
-            ? 'I could not find matching passages in the selected resources or web data for that question. Try asking with a more specific term, concept, or page reference.'
+          includeWebData || includeStructuralData
+            ? 'I could not find matching passages, web data, or class structure data for that question. Try asking with a more specific term, concept, or page reference.'
             : 'I could not find matching passages in the selected resources for that question. Try asking with a more specific term, concept, or page reference.',
         sources: [],
       });
@@ -478,12 +498,13 @@ export async function POST(
 
     const prompt = [
       'You are Smart Learn AI inside a book reader.',
-      buildAskAiGuardrailPrompt(resourceScopeLabel, { includeWebData }),
+      buildAskAiGuardrailPrompt(resourceScopeLabel, { includeWebData, includeStructuralData }),
       'Use short paragraphs. Use flat bullets only if they make the answer clearer.',
       '',
       `Current book title: ${bookTitle}`,
       `Resource scope: ${resourceScopeLabel}`,
       `Web data: ${includeWebData ? 'Enabled by the student' : 'Disabled'}`,
+      `Structural search: ${includeStructuralData ? 'Enabled by the student' : 'Disabled'}`,
       `Gemini model: ${selectedModel}`,
       '',
       'Recent conversation:',
@@ -498,6 +519,13 @@ export async function POST(
             webResults.length > 0 ? formatWebSearchContext(webResults) : 'No DuckDuckGo web context was found.',
           ]
         : []),
+      ...(includeStructuralData
+        ? [
+            '',
+            'Class structure data from database:',
+            structuralResult.context || 'No class structure data was found.',
+          ]
+        : []),
       '',
       `Student's latest question: ${latestUserMessage.content}`,
     ].join('\n');
@@ -506,7 +534,11 @@ export async function POST(
 
     return NextResponse.json({
       answer,
-      sources: buildSources(hits, includeWebData ? webResults : []),
+      sources: buildSources(
+        hits,
+        includeWebData ? webResults : [],
+        includeStructuralData ? structuralResult.sources : []
+      ),
     });
   } catch (error: unknown) {
     const message = getErrorMessage(error, 'Failed to answer this question');

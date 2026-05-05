@@ -12,15 +12,21 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 
 type ChatRole = 'user' | 'assistant';
-type AskAiResourceScope = 'currentBook' | 'entireModule' | 'allBooks' | 'includeVideos' | 'includeWebData';
-type CitationTab = 'pdf' | 'video' | 'web';
+type AskAiResourceScope =
+  | 'currentBook'
+  | 'entireModule'
+  | 'allBooks'
+  | 'includeVideos'
+  | 'includeWebData'
+  | 'includeStructuralData';
+type CitationTab = 'pdf' | 'video' | 'web' | 'structural';
 
 interface ChatSource {
   pageNumber: number | null;
   excerpt: string;
   score: number;
   sourceId: string;
-  contentType: 'pdf' | 'video' | 'web';
+  contentType: 'pdf' | 'video' | 'web' | 'structural';
   title: string | null;
   startSeconds: number | null;
   endSeconds: number | null;
@@ -39,6 +45,7 @@ interface ResourceScopeState {
   allBooks: boolean;
   includeVideos: boolean;
   includeWebData: boolean;
+  includeStructuralData: boolean;
 }
 
 interface PdfSourceMeta {
@@ -107,6 +114,7 @@ function formatTimecode(value: number | null) {
 function getDefaultCitationTab(sources: ChatSource[]): CitationTab {
   if (sources.some((source) => source.contentType === 'pdf')) return 'pdf';
   if (sources.some((source) => source.contentType === 'video')) return 'video';
+  if (sources.some((source) => source.contentType === 'structural')) return 'structural';
   return 'web';
 }
 
@@ -117,18 +125,20 @@ function getScopeSummary(
 ) {
   const currentSourceLabel = sourceKind === 'video' ? 'Current video' : 'Current book';
   const webSuffix = resourceScopes.includeWebData ? ' + web' : '';
+  const structureSuffix = resourceScopes.includeStructuralData ? ' + data' : '';
+  const suffix = `${webSuffix}${structureSuffix}`;
 
   if (resourceScopes.allBooks && resourceScopes.includeVideos) {
-    return `${currentSourceLabel} + all books + videos${webSuffix}`;
+    return `${currentSourceLabel} + all books + videos${suffix}`;
   }
 
-  if (resourceScopes.allBooks) return `${currentSourceLabel} + all books${webSuffix}`;
+  if (resourceScopes.allBooks) return `${currentSourceLabel} + all books${suffix}`;
   if (resourceScopes.entireModule && resourceScopes.includeVideos && hasModuleScope) {
-    return `${currentSourceLabel} + module + videos${webSuffix}`;
+    return `${currentSourceLabel} + module + videos${suffix}`;
   }
-  if (resourceScopes.includeVideos) return `${currentSourceLabel} + videos${webSuffix}`;
-  if (resourceScopes.entireModule && hasModuleScope) return `${currentSourceLabel} + module${webSuffix}`;
-  return `${currentSourceLabel}${webSuffix}`;
+  if (resourceScopes.includeVideos) return `${currentSourceLabel} + videos${suffix}`;
+  if (resourceScopes.entireModule && hasModuleScope) return `${currentSourceLabel} + module${suffix}`;
+  return `${currentSourceLabel}${suffix}`;
 }
 
 function normalizeResourceScopeState(value: unknown): ResourceScopeState {
@@ -138,6 +148,7 @@ function normalizeResourceScopeState(value: unknown): ResourceScopeState {
       allBooks: false,
       includeVideos: false,
       includeWebData: false,
+      includeStructuralData: false,
     };
   }
 
@@ -153,6 +164,10 @@ function normalizeResourceScopeState(value: unknown): ResourceScopeState {
     ),
     includeWebData: Boolean((value as { includeWebData?: unknown; webData?: unknown }).includeWebData ??
       (value as { includeWebData?: unknown; webData?: unknown }).webData),
+    includeStructuralData: Boolean(
+      (value as { includeStructuralData?: unknown; structuralData?: unknown }).includeStructuralData ??
+        (value as { includeStructuralData?: unknown; structuralData?: unknown }).structuralData
+    ),
   };
 }
 
@@ -181,6 +196,8 @@ function normalizeMessages(value: unknown): ChatMessage[] {
               const contentType =
                 (source as { contentType?: unknown }).contentType === 'web'
                   ? 'web'
+                  : (source as { contentType?: unknown }).contentType === 'structural'
+                    ? 'structural'
                   : (source as { contentType?: unknown }).contentType === 'video'
                     ? 'video'
                     : 'pdf';
@@ -271,6 +288,7 @@ export function BookAskAIPanel({
     allBooks: false,
     includeVideos: false,
     includeWebData: false,
+    includeStructuralData: false,
   });
   const [historyReady, setHistoryReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -303,6 +321,7 @@ export function BookAskAIPanel({
         allBooks: false,
         includeVideos: false,
         includeWebData: false,
+        includeStructuralData: false,
       });
       setHistoryReady(true);
       return;
@@ -330,6 +349,7 @@ export function BookAskAIPanel({
         allBooks: false,
         includeVideos: false,
         includeWebData: false,
+        includeStructuralData: false,
       });
     } finally {
       setHistoryReady(true);
@@ -433,6 +453,7 @@ export function BookAskAIPanel({
             ...(resourceScopes.allBooks ? (['allBooks'] as const) : []),
             ...(resourceScopes.includeVideos ? (['includeVideos'] as const) : []),
             ...(resourceScopes.includeWebData ? (['includeWebData'] as const) : []),
+            ...(resourceScopes.includeStructuralData ? (['includeStructuralData'] as const) : []),
           ],
           messages: nextMessages.map((message) => ({
             role: message.role,
@@ -499,6 +520,10 @@ export function BookAskAIPanel({
       if (url) {
         window.open(url, '_blank', 'noopener,noreferrer');
       }
+      return;
+    }
+
+    if (source.contentType === 'structural') {
       return;
     }
 
@@ -607,6 +632,11 @@ export function BookAskAIPanel({
                         label: 'Include Web Data',
                         disabled: false,
                       },
+                      {
+                        key: 'includeStructuralData',
+                        label: 'Include Structural Search',
+                        disabled: false,
+                      },
                     ] as const).map((option) => (
                       <button
                         key={option.key}
@@ -709,10 +739,12 @@ export function BookAskAIPanel({
             const pdfSources = messageSources.filter((source) => source.contentType === 'pdf');
             const videoSources = messageSources.filter((source) => source.contentType === 'video');
             const webSources = messageSources.filter((source) => source.contentType === 'web');
+            const structuralSources = messageSources.filter((source) => source.contentType === 'structural');
             const citationOptions = [
               { key: 'pdf' as const, count: pdfSources.length, label: 'Book citations' },
               { key: 'video' as const, count: videoSources.length, label: 'Video citations' },
               { key: 'web' as const, count: webSources.length, label: 'Web sources' },
+              { key: 'structural' as const, count: structuralSources.length, label: 'Class data sources' },
             ].filter((option) => option.count > 0);
             const showCitationTabs = citationOptions.length > 1;
             const preferredCitationTab = citationTabs[message.id];
@@ -728,6 +760,8 @@ export function BookAskAIPanel({
                   ? videoSources
                   : activeCitationTab === 'web'
                     ? webSources
+                    : activeCitationTab === 'structural'
+                      ? structuralSources
                   : messageSources;
 
             return (
@@ -881,6 +915,8 @@ export function BookAskAIPanel({
                             const canInteractWithSource =
                               source.contentType === 'web'
                                 ? Boolean(source.url || source.sourceId)
+                                : source.contentType === 'structural'
+                                  ? false
                                 : source.contentType === 'video'
                                 ? true
                                 : source.contentType === 'pdf' &&
@@ -909,6 +945,8 @@ export function BookAskAIPanel({
                                       <span className="block text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">
                                         {source.contentType === 'web'
                                           ? 'Web source'
+                                          : source.contentType === 'structural'
+                                            ? 'Class data'
                                           : source.contentType === 'video'
                                           ? videoTimeRange || 'Transcript excerpt'
                                           : source.pageNumber
@@ -920,17 +958,23 @@ export function BookAskAIPanel({
                                           ? getPdfSourceLabel(source)
                                           : source.contentType === 'web'
                                             ? source.title || 'DuckDuckGo result'
-                                            : source.title || 'Class recording'}
+                                            : source.contentType === 'structural'
+                                              ? source.title || 'Class structure data'
+                                              : source.title || 'Class recording'}
                                       </span>
                                       <span className="block text-[11px] font-medium text-stone-400">
                                         {source.contentType === 'web'
                                           ? source.sourceId.replace(/^https?:\/\//, '').replace(/^www\./, '')
+                                          : source.contentType === 'structural'
+                                            ? 'Database snapshot'
                                           : `Similarity ${formatSimilarityScore(source.score)}`}
                                       </span>
                                     </div>
                                     <span className="pt-0.5 text-xs font-medium text-stone-400">
                                       {source.contentType === 'web'
                                         ? 'Open web'
+                                        : source.contentType === 'structural'
+                                          ? 'Preview only'
                                         : source.contentType === 'video'
                                         ? 'Open source'
                                         : source.contentType !== 'pdf'
@@ -1002,7 +1046,11 @@ export function BookAskAIPanel({
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs leading-5 text-stone-500">
               {resourceScopes.includeWebData
-                ? 'Answers may use selected uploaded materials plus DuckDuckGo web context.'
+                ? resourceScopes.includeStructuralData
+                  ? 'Answers may use selected uploaded materials, DuckDuckGo web context, and class data.'
+                  : 'Answers may use selected uploaded materials plus DuckDuckGo web context.'
+                : resourceScopes.includeStructuralData
+                  ? 'Answers may use selected uploaded materials plus class data.'
                 : `Answers are grounded in retrieved passages from ${selectedScopeSummary.toLowerCase()}.`}
             </p>
             <button
