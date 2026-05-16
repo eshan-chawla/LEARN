@@ -12,14 +12,8 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 
 type ChatRole = 'user' | 'assistant';
-type AskAiResourceScope =
-  | 'currentBook'
-  | 'entireModule'
-  | 'allBooks'
-  | 'includeVideos'
-  | 'includeWebData'
-  | 'includeStructuralData';
 type CitationTab = 'pdf' | 'video' | 'web' | 'structural';
+type AskAiStepKind = 'retrieval' | 'tool' | 'decision' | 'web' | 'structure' | 'generation';
 
 interface ChatSource {
   pageNumber: number | null;
@@ -33,19 +27,23 @@ interface ChatSource {
   url?: string;
 }
 
+interface AskAiStep {
+  id: string;
+  kind: AskAiStepKind;
+  title: string;
+  detail: string;
+  query?: string;
+  count?: number;
+  sourceType?: 'pdf' | 'video' | 'web' | 'structural';
+  scope?: string;
+}
+
 interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
   sources?: ChatSource[];
-}
-
-interface ResourceScopeState {
-  entireModule: boolean;
-  allBooks: boolean;
-  includeVideos: boolean;
-  includeWebData: boolean;
-  includeStructuralData: boolean;
+  steps?: AskAiStep[];
 }
 
 interface PdfSourceMeta {
@@ -72,13 +70,22 @@ interface BookAskAIPanelProps {
   onResizeStart: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 }
 
-function createMessage(role: ChatRole, content: string, sources?: ChatSource[]): ChatMessage {
-  return {
+function createMessage(role: ChatRole, content: string, sources?: ChatSource[], steps?: AskAiStep[]): ChatMessage {
+  const message: ChatMessage = {
     id: `${role}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     role,
     content,
-    sources,
   };
+
+  if (sources) {
+    message.sources = sources;
+  }
+
+  if (steps) {
+    message.steps = steps;
+  }
+
+  return message;
 }
 
 function isLegacyWelcomeMessage(message: ChatMessage) {
@@ -118,57 +125,73 @@ function getDefaultCitationTab(sources: ChatSource[]): CitationTab {
   return 'web';
 }
 
-function getScopeSummary(
-  hasModuleScope: boolean,
-  resourceScopes: Record<Exclude<AskAiResourceScope, 'currentBook'>, boolean>,
-  sourceKind: 'pdf' | 'video'
-) {
-  const currentSourceLabel = sourceKind === 'video' ? 'Current video' : 'Current book';
-  const webSuffix = resourceScopes.includeWebData ? ' + web' : '';
-  const structureSuffix = resourceScopes.includeStructuralData ? ' + data' : '';
-  const suffix = `${webSuffix}${structureSuffix}`;
-
-  if (resourceScopes.allBooks && resourceScopes.includeVideos) {
-    return `${currentSourceLabel} + all books + videos${suffix}`;
+function normalizeUseExternalSources(value: unknown, legacyScopes: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
   }
 
-  if (resourceScopes.allBooks) return `${currentSourceLabel} + all books${suffix}`;
-  if (resourceScopes.entireModule && resourceScopes.includeVideos && hasModuleScope) {
-    return `${currentSourceLabel} + module + videos${suffix}`;
+  if (!legacyScopes || typeof legacyScopes !== 'object') {
+    return false;
   }
-  if (resourceScopes.includeVideos) return `${currentSourceLabel} + videos${suffix}`;
-  if (resourceScopes.entireModule && hasModuleScope) return `${currentSourceLabel} + module${suffix}`;
-  return `${currentSourceLabel}${suffix}`;
+
+  return Boolean(
+    (legacyScopes as { includeWebData?: unknown; webData?: unknown }).includeWebData ??
+      (legacyScopes as { includeWebData?: unknown; webData?: unknown }).webData
+  );
 }
 
-function normalizeResourceScopeState(value: unknown): ResourceScopeState {
-  if (!value || typeof value !== 'object') {
-    return {
-      entireModule: false,
-      allBooks: false,
-      includeVideos: false,
-      includeWebData: false,
-      includeStructuralData: false,
-    };
+function normalizeSteps(value: unknown): AskAiStep[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
   }
 
-  return {
-    entireModule: Boolean((value as { entireModule?: unknown }).entireModule),
-    allBooks: Boolean(
-      (value as { allBooks?: unknown; entireClassModules?: unknown }).allBooks ??
-        (value as { allBooks?: unknown; entireClassModules?: unknown }).entireClassModules
-    ),
-    includeVideos: Boolean(
-      (value as { includeVideos?: unknown; entireClassContent?: unknown }).includeVideos ??
-        (value as { includeVideos?: unknown; entireClassContent?: unknown }).entireClassContent
-    ),
-    includeWebData: Boolean((value as { includeWebData?: unknown; webData?: unknown }).includeWebData ??
-      (value as { includeWebData?: unknown; webData?: unknown }).webData),
-    includeStructuralData: Boolean(
-      (value as { includeStructuralData?: unknown; structuralData?: unknown }).includeStructuralData ??
-        (value as { includeStructuralData?: unknown; structuralData?: unknown }).structuralData
-    ),
-  };
+  const steps = value
+    .map((step): AskAiStep | null => {
+      if (!step || typeof step !== 'object') return null;
+
+      const id = (step as { id?: unknown }).id;
+      const kind = (step as { kind?: unknown }).kind;
+      const title = (step as { title?: unknown }).title;
+      const detail = (step as { detail?: unknown }).detail;
+
+      if (
+        typeof id !== 'string' ||
+        (kind !== 'retrieval' &&
+          kind !== 'tool' &&
+          kind !== 'decision' &&
+          kind !== 'web' &&
+          kind !== 'structure' &&
+          kind !== 'generation') ||
+        typeof title !== 'string' ||
+        typeof detail !== 'string'
+      ) {
+        return null;
+      }
+
+      const normalized: AskAiStep = {
+        id,
+        kind,
+        title,
+        detail,
+      };
+
+      const query = (step as { query?: unknown }).query;
+      const count = (step as { count?: unknown }).count;
+      const sourceType = (step as { sourceType?: unknown }).sourceType;
+      const scope = (step as { scope?: unknown }).scope;
+
+      if (typeof query === 'string') normalized.query = query;
+      if (typeof count === 'number' && Number.isFinite(count)) normalized.count = count;
+      if (sourceType === 'pdf' || sourceType === 'video' || sourceType === 'web' || sourceType === 'structural') {
+        normalized.sourceType = sourceType;
+      }
+      if (typeof scope === 'string') normalized.scope = scope;
+
+      return normalized;
+    })
+    .filter((step): step is AskAiStep => step !== null);
+
+  return steps.length > 0 ? steps : undefined;
 }
 
 function normalizeMessages(value: unknown): ChatMessage[] {
@@ -183,6 +206,7 @@ function normalizeMessages(value: unknown): ChatMessage[] {
       const role = (message as { role?: unknown }).role;
       const content = (message as { content?: unknown }).content;
       const rawSources = (message as { sources?: unknown }).sources;
+      const rawSteps = (message as { steps?: unknown }).steps;
 
       if ((role !== 'user' && role !== 'assistant') || typeof content !== 'string' || !content.trim()) {
         return null;
@@ -248,6 +272,11 @@ function normalizeMessages(value: unknown): ChatMessage[] {
         nextMessage.sources = sources;
       }
 
+      const steps = normalizeSteps(rawSteps);
+      if (steps) {
+        nextMessage.steps = steps;
+      }
+
       return nextMessage;
     })
     .filter((message): message is ChatMessage => message !== null)
@@ -263,7 +292,6 @@ export function BookAskAIPanel({
   bookTitle,
   moduleBookIds,
   pdfSourceMeta,
-  hasModuleScope,
   sourceKind = 'pdf',
   askAiPath,
   open,
@@ -280,23 +308,16 @@ export function BookAskAIPanel({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedSources, setExpandedSources] = useState<Record<string, boolean>>({});
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
   const [citationTabs, setCitationTabs] = useState<Record<string, CitationTab>>({});
-  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState<AskAiGeminiModel>(DEFAULT_ASK_AI_GEMINI_MODEL);
-  const [resourceScopes, setResourceScopes] = useState<ResourceScopeState>({
-    entireModule: false,
-    allBooks: false,
-    includeVideos: false,
-    includeWebData: false,
-    includeStructuralData: false,
-  });
+  const [useExternalSources, setUseExternalSources] = useState(false);
   const [historyReady, setHistoryReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const resourceMenuRef = useRef<HTMLDivElement | null>(null);
+  const settingsMenuRef = useRef<HTMLDivElement | null>(null);
   const storageKey = `smart-learn-book-ask-ai-session:${classSlug}`;
-
-  const selectedScopeSummary = getScopeSummary(hasModuleScope, resourceScopes, sourceKind);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -306,9 +327,10 @@ export function BookAskAIPanel({
     if (typeof window === 'undefined') return;
 
     setExpandedSources({});
+    setExpandedSteps({});
     setCitationTabs({});
     setError(null);
-    setResourceMenuOpen(false);
+    setSettingsMenuOpen(false);
 
     const storedValue = window.sessionStorage.getItem(storageKey);
 
@@ -316,13 +338,7 @@ export function BookAskAIPanel({
       setMessages([]);
       setInput('');
       setSelectedModel(DEFAULT_ASK_AI_GEMINI_MODEL);
-      setResourceScopes({
-        entireModule: false,
-        allBooks: false,
-        includeVideos: false,
-        includeWebData: false,
-        includeStructuralData: false,
-      });
+      setUseExternalSources(false);
       setHistoryReady(true);
       return;
     }
@@ -332,25 +348,20 @@ export function BookAskAIPanel({
         messages?: unknown;
         input?: unknown;
         resourceScopes?: unknown;
+        useExternalSources?: unknown;
         selectedModel?: unknown;
         model?: unknown;
       };
 
       setMessages(normalizeMessages(parsed.messages));
       setInput(typeof parsed.input === 'string' ? parsed.input : '');
-      setResourceScopes(normalizeResourceScopeState(parsed.resourceScopes));
+      setUseExternalSources(normalizeUseExternalSources(parsed.useExternalSources, parsed.resourceScopes));
       setSelectedModel(normalizeAskAiGeminiModel(parsed.selectedModel ?? parsed.model));
     } catch {
       setMessages([]);
       setInput('');
       setSelectedModel(DEFAULT_ASK_AI_GEMINI_MODEL);
-      setResourceScopes({
-        entireModule: false,
-        allBooks: false,
-        includeVideos: false,
-        includeWebData: false,
-        includeStructuralData: false,
-      });
+      setUseExternalSources(false);
     } finally {
       setHistoryReady(true);
     }
@@ -364,26 +375,11 @@ export function BookAskAIPanel({
       JSON.stringify({
         messages,
         input,
-        resourceScopes,
+        useExternalSources,
         selectedModel,
       })
     );
-  }, [historyReady, input, messages, resourceScopes, selectedModel, storageKey]);
-
-  useEffect(() => {
-    if (!historyReady) return;
-
-    setResourceScopes((current) => {
-      if (hasModuleScope || !current.entireModule) {
-        return current;
-      }
-
-      return {
-        ...current,
-        entireModule: false,
-      };
-    });
-  }, [hasModuleScope, historyReady]);
+  }, [historyReady, input, messages, selectedModel, storageKey, useExternalSources]);
 
   useEffect(() => {
     if (open) {
@@ -392,16 +388,16 @@ export function BookAskAIPanel({
   }, [open]);
 
   useEffect(() => {
-    if (!resourceMenuOpen) return;
+    if (!settingsMenuOpen) return;
 
     const handlePointerDown = (event: MouseEvent) => {
-      if (resourceMenuRef.current?.contains(event.target as Node)) return;
-      setResourceMenuOpen(false);
+      if (settingsMenuRef.current?.contains(event.target as Node)) return;
+      setSettingsMenuOpen(false);
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        setResourceMenuOpen(false);
+        setSettingsMenuOpen(false);
       }
     };
 
@@ -412,7 +408,7 @@ export function BookAskAIPanel({
       window.removeEventListener('mousedown', handlePointerDown);
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [resourceMenuOpen]);
+  }, [settingsMenuOpen]);
 
   const handleSubmit = async () => {
     const question = input.trim();
@@ -447,14 +443,7 @@ export function BookAskAIPanel({
           bookTitle,
           model: selectedModel,
           moduleBookIds,
-          resourceScopes: [
-            'currentBook',
-            ...(hasModuleScope && resourceScopes.entireModule ? (['entireModule'] as const) : []),
-            ...(resourceScopes.allBooks ? (['allBooks'] as const) : []),
-            ...(resourceScopes.includeVideos ? (['includeVideos'] as const) : []),
-            ...(resourceScopes.includeWebData ? (['includeWebData'] as const) : []),
-            ...(resourceScopes.includeStructuralData ? (['includeStructuralData'] as const) : []),
-          ],
+          useExternalSources,
           messages: nextMessages.map((message) => ({
             role: message.role,
             content: message.content,
@@ -463,7 +452,7 @@ export function BookAskAIPanel({
       });
 
       const payload = await response.json().catch(() => null) as
-        | { answer?: string; sources?: ChatSource[]; error?: string }
+        | { answer?: string; sources?: ChatSource[]; steps?: AskAiStep[]; error?: string }
         | null;
 
       if (!response.ok) {
@@ -473,10 +462,17 @@ export function BookAskAIPanel({
       const assistantMessage = createMessage(
         'assistant',
         payload?.answer || 'I could not generate an answer.',
-        payload?.sources
+        payload?.sources,
+        normalizeSteps(payload?.steps)
       );
 
       setMessages((current) => [...current, assistantMessage]);
+      if (assistantMessage.steps?.length) {
+        setExpandedSteps((current) => ({
+          ...current,
+          [assistantMessage.id]: false,
+        }));
+      }
       if (assistantMessage.sources?.length) {
         setExpandedSources((current) => ({
           ...current,
@@ -585,21 +581,23 @@ export function BookAskAIPanel({
       <div className="flex items-center justify-between gap-3 border-b border-stone-200/80 px-4 py-4">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-stone-500">Ask AI</p>
-          <div className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)_8.5rem] items-start gap-2 max-[420px]:grid-cols-1">
-            <div ref={resourceMenuRef} className={`relative min-w-0 ${resourceMenuOpen ? 'z-50' : 'z-10'}`}>
+          <div className="mt-2 min-w-0">
+            <div ref={settingsMenuRef} className={`relative min-w-0 ${settingsMenuOpen ? 'z-50' : 'z-10'}`}>
               <button
                 type="button"
-                onClick={() => setResourceMenuOpen((current) => !current)}
-                className="flex h-full min-h-[4.05rem] w-full items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white/85 px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-white"
+                onClick={() => setSettingsMenuOpen((current) => !current)}
+                className="flex min-h-[4.05rem] w-full items-center justify-between gap-3 rounded-2xl border border-stone-200 bg-white/85 px-3 py-2.5 text-left transition hover:border-stone-300 hover:bg-white"
                 aria-haspopup="menu"
-                aria-expanded={resourceMenuOpen}
+                aria-expanded={settingsMenuOpen}
               >
                 <div className="min-w-0">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">Resources</p>
-                  <p className="mt-1 truncate text-sm text-stone-600">{selectedScopeSummary}</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">Settings</p>
+                  <p className="mt-1 truncate text-sm text-stone-600">
+                    {getAskAiGeminiModelLabel(selectedModel)}
+                  </p>
                 </div>
                 <svg
-                  className={`h-4 w-4 flex-shrink-0 text-stone-500 transition-transform ${resourceMenuOpen ? 'rotate-180' : 'rotate-0'}`}
+                  className={`h-4 w-4 flex-shrink-0 text-stone-500 transition-transform ${settingsMenuOpen ? 'rotate-180' : 'rotate-0'}`}
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -608,116 +606,59 @@ export function BookAskAIPanel({
                 </svg>
               </button>
 
-              {resourceMenuOpen && (
-                <div className="absolute left-0 top-full z-50 mt-2 w-[min(18rem,calc(100vw-2rem))] rounded-[24px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-2 shadow-[0_24px_60px_rgba(28,25,23,0.16)]">
-                  <div className="space-y-1">
-                    {([
-                      {
-                        key: 'entireModule',
-                        label: 'Include Entire Module',
-                        disabled: !hasModuleScope,
-                      },
-                      {
-                        key: 'allBooks',
-                        label: 'Include All Books',
-                        disabled: false,
-                      },
-                      {
-                        key: 'includeVideos',
-                        label: 'Include Videos',
-                        disabled: false,
-                      },
-                      {
-                        key: 'includeWebData',
-                        label: 'Include Web Data',
-                        disabled: false,
-                      },
-                      {
-                        key: 'includeStructuralData',
-                        label: 'Include Structural Search',
-                        disabled: false,
-                      },
-                    ] as const).map((option) => (
-                      <button
-                        key={option.key}
-                        type="button"
-                        disabled={option.disabled}
-                        onClick={() => {
-                          if (option.disabled) return;
-                          setResourceScopes((current) => {
-                            const nextValue = !current[option.key];
+              {settingsMenuOpen && (
+                <div className="absolute left-0 top-full z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] rounded-[24px] border border-stone-200 bg-[rgba(255,253,249,0.98)] p-3 shadow-[0_24px_60px_rgba(28,25,23,0.16)]">
+                  <label className="relative block rounded-2xl border border-stone-200 bg-white/85 px-3 py-2.5 transition focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100">
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">
+                      Model
+                    </span>
+                    <select
+                      value={selectedModel}
+                      onChange={handleModelChange}
+                      className="mt-1 w-full appearance-none bg-transparent pr-7 text-sm text-stone-700 outline-none"
+                      title={`Gemini model: ${getAskAiGeminiModelLabel(selectedModel)}`}
+                    >
+                      {ASK_AI_GEMINI_MODELS.map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="pointer-events-none absolute right-3 top-1/2 mt-1 -translate-y-1/2 text-stone-500">
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M6 9l6 6 6-6" />
+                      </svg>
+                    </span>
+                  </label>
 
-                            if (option.key === 'entireModule') {
-                              return {
-                                ...current,
-                                entireModule: nextValue,
-                                allBooks: hasModuleScope && !nextValue ? false : current.allBooks,
-                              };
-                            }
-
-                            if (option.key === 'allBooks') {
-                              return {
-                                ...current,
-                                allBooks: nextValue,
-                                entireModule:
-                                  nextValue && hasModuleScope ? true : current.entireModule,
-                              };
-                            }
-
-                            return {
-                              ...current,
-                              [option.key]: nextValue,
-                            };
-                          });
-                        }}
-                        className="flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-stone-100/80 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-stone-800">{option.label}</p>
-                        </div>
-                        <span
-                          className={`ml-auto inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border px-0.5 transition ${
-                            resourceScopes[option.key]
-                              ? 'border-stone-900 bg-stone-900'
-                              : 'border-stone-300 bg-white'
-                          }`}
-                          aria-hidden="true"
-                        >
-                          <span
-                            className={`h-4 w-4 rounded-full bg-white shadow-[0_2px_6px_rgba(28,25,23,0.16)] transition-transform ${
-                              resourceScopes[option.key] ? 'translate-x-5' : 'translate-x-0'
-                            }`}
-                          />
-                        </span>
-                      </button>
-                    ))}
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setUseExternalSources((current) => !current)}
+                    className="mt-2 flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2.5 text-left transition hover:bg-stone-100/80"
+                    aria-pressed={useExternalSources}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-stone-800">Use external sources</p>
+                      <p className="mt-0.5 text-xs leading-5 text-stone-500">Allow DuckDuckGo web context.</p>
+                    </div>
+                    <span
+                      className={`ml-auto inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border px-0.5 transition ${
+                        useExternalSources
+                          ? 'border-stone-900 bg-stone-900'
+                          : 'border-stone-300 bg-white'
+                      }`}
+                      aria-hidden="true"
+                    >
+                      <span
+                        className={`h-4 w-4 rounded-full bg-white shadow-[0_2px_6px_rgba(28,25,23,0.16)] transition-transform ${
+                          useExternalSources ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </span>
+                  </button>
                 </div>
               )}
             </div>
-
-            <label className="relative z-0 block min-w-0 rounded-2xl border border-stone-200 bg-white/85 px-3 py-2.5 transition hover:border-stone-300 hover:bg-white focus-within:border-sky-400 focus-within:ring-2 focus-within:ring-sky-100">
-              <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">
-                Model
-              </span>
-              <select
-                value={selectedModel}
-                onChange={handleModelChange}
-                className="mt-1 w-full appearance-none bg-transparent pr-6 text-sm text-stone-600 outline-none"
-                title={`Gemini model: ${getAskAiGeminiModelLabel(selectedModel)}`}
-              >
-                {ASK_AI_GEMINI_MODELS.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.label}
-                  </option>
-                ))}
-              </select>
-              <span className="pointer-events-none absolute right-3 top-1/2 mt-1 -translate-y-1/2 text-stone-500">
-                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M6 9l6 6 6-6" />
-                </svg>
-              </span>
-            </label>
           </div>
         </div>
         <button
@@ -736,6 +677,7 @@ export function BookAskAIPanel({
         <div className="space-y-4">
           {messages.map((message) => {
             const messageSources = message.sources || [];
+            const messageSteps = message.steps || [];
             const pdfSources = messageSources.filter((source) => source.contentType === 'pdf');
             const videoSources = messageSources.filter((source) => source.contentType === 'video');
             const webSources = messageSources.filter((source) => source.contentType === 'web');
@@ -772,6 +714,69 @@ export function BookAskAIPanel({
                 <p className={`text-[11px] font-semibold uppercase tracking-[0.22em] ${message.role === 'user' ? 'text-stone-300' : 'text-stone-500'}`}>
                   {message.role === 'user' ? 'You' : 'Smart Learn AI'}
                 </p>
+
+                {message.role === 'assistant' && messageSteps.length > 0 && (
+                  <div className="mt-3 rounded-2xl border border-stone-200 bg-stone-50/70">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setExpandedSteps((current) => ({
+                          ...current,
+                          [message.id]: !(current[message.id] ?? false),
+                        }));
+                      }}
+                      aria-expanded={expandedSteps[message.id] ?? false}
+                      className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition hover:bg-white/70"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-[10px] font-semibold uppercase tracking-[0.2em] text-stone-500">
+                          Steps taken
+                        </span>
+                        <span className="mt-0.5 block truncate text-xs text-stone-500">
+                          {messageSteps.length} step{messageSteps.length === 1 ? '' : 's'} in this answer
+                        </span>
+                      </span>
+                      <svg
+                        className={`h-4 w-4 flex-shrink-0 text-stone-500 transition-transform ${
+                          expandedSteps[message.id] ? 'rotate-180' : 'rotate-0'
+                        }`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M6 9l6 6 6-6" />
+                      </svg>
+                    </button>
+
+                    <div className={`grid transition-[grid-template-rows] duration-300 ${
+                      expandedSteps[message.id] ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+                    }`}>
+                      <div className="overflow-hidden">
+                        <div className="space-y-2 border-t border-stone-200 px-3 py-3">
+                          {messageSteps.map((step, index) => (
+                            <div key={`${message.id}-step-${step.id}-${index}`} className="rounded-xl bg-white/80 px-3 py-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-xs font-semibold text-stone-700">{step.title}</p>
+                                  <p className="mt-1 text-xs leading-5 text-stone-500">{step.detail}</p>
+                                  {step.query && (
+                                    <p className="mt-1 truncate text-[11px] text-stone-400">
+                                      Query: {step.query}
+                                    </p>
+                                  )}
+                                </div>
+                                <span className="rounded-full bg-stone-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-500">
+                                  {step.kind}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${message.role === 'user' ? 'text-stone-50' : 'text-stone-700'}`}>
                   {message.content}
                 </div>
@@ -1005,13 +1010,13 @@ export function BookAskAIPanel({
 
           {sending && (
             <div className="mr-4 rounded-[24px] border border-stone-200 bg-white/85 px-4 py-3 text-sm text-stone-600 shadow-[0_12px_30px_rgba(28,25,23,0.06)]">
-              Thinking with the selected resources{resourceScopes.includeWebData ? ' and web data' : ''}...
+              Thinking with class context{useExternalSources ? ' and web data' : ''}...
             </div>
           )}
 
           {!sending && messages.length === 0 && (
             <div className="rounded-[24px] border border-dashed border-stone-200 bg-white/65 px-4 py-5 text-sm leading-6 text-stone-500">
-              Try asking for a definition, a summary of a concept, or where a topic is discussed in the selected resources.
+              Try asking for a definition, a summary of a concept, or where a topic is discussed in your class materials.
             </div>
           )}
 
@@ -1045,13 +1050,9 @@ export function BookAskAIPanel({
 
           <div className="flex items-center justify-between gap-3">
             <p className="text-xs leading-5 text-stone-500">
-              {resourceScopes.includeWebData
-                ? resourceScopes.includeStructuralData
-                  ? 'Answers may use selected uploaded materials, DuckDuckGo web context, and class data.'
-                  : 'Answers may use selected uploaded materials plus DuckDuckGo web context.'
-                : resourceScopes.includeStructuralData
-                  ? 'Answers may use selected uploaded materials plus class data.'
-                : `Answers are grounded in retrieved passages from ${selectedScopeSummary.toLowerCase()}.`}
+              {useExternalSources
+                ? 'Answers use class materials and class data first, with DuckDuckGo web context when useful.'
+                : 'Answers are grounded in class materials, recordings, and class data.'}
             </p>
             <button
               type="submit"
