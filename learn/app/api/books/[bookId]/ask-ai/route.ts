@@ -318,6 +318,72 @@ function createStep(
   };
 }
 
+function shouldRepairBroadPdfToolDecision(answer: string, pdfContextHits: RetrievalHit[]) {
+  const normalizedAnswer = answer.toLowerCase();
+
+  return (
+    pdfContextHits.length < 3 ||
+    normalizedAnswer.includes('i could not find that in the selected resources') ||
+    normalizedAnswer.includes('not covered in the selected resources') ||
+    normalizedAnswer.includes('not enough information')
+  );
+}
+
+function shouldForceBroadPdfToolFallback(answer: string, pdfContextHits: RetrievalHit[]) {
+  const normalizedAnswer = answer.toLowerCase();
+
+  return (
+    pdfContextHits.length === 0 ||
+    normalizedAnswer.includes('i could not find that in the selected resources') ||
+    normalizedAnswer.includes('not covered in the selected resources')
+  );
+}
+
+function getFunctionCallQuery(functionCall: AskAiFunctionCall, fallback: string) {
+  return typeof functionCall.args?.query === 'string' && functionCall.args.query.trim()
+    ? functionCall.args.query.trim()
+    : fallback;
+}
+
+function describeToolDecision(functionCall: AskAiFunctionCall, fallbackQuery: string, modelText: string) {
+  if (functionCall.name === 'search_class_pdfs') {
+    const query = getFunctionCallQuery(functionCall, fallbackQuery);
+    const reason = modelText.trim()
+      ? ` Model note: ${modelText.trim()}`
+      : '';
+
+    return {
+      title: 'Model requested PDF search',
+      detail: `The selected model decided the focused context may be insufficient and requested search_class_pdfs with the rewritten query "${query}".${reason}`,
+      query,
+      sourceType: 'pdf' as const,
+      scope: 'all class PDFs',
+    };
+  }
+
+  if (functionCall.name === 'query_class_structure') {
+    const reason = modelText.trim()
+      ? ` Model note: ${modelText.trim()}`
+      : '';
+
+    return {
+      title: 'Model requested class structure',
+      detail: `The selected model requested query_class_structure to inspect structured class metadata before answering.${reason}`,
+      query: undefined,
+      sourceType: 'structural' as const,
+      scope: 'Supabase class database',
+    };
+  }
+
+  return {
+    title: 'Model requested unsupported tool',
+    detail: `The selected model requested ${functionCall.name}, but that tool is not available in this route.`,
+    query: undefined,
+    sourceType: undefined,
+    scope: 'unsupported tool',
+  };
+}
+
 function mergeRetrievalHits(hitGroups: RetrievalHit[][], limit = 8) {
   const seen = new Set<string>();
 
@@ -479,7 +545,7 @@ export async function POST(
           'broad-pdf-tool-reserved',
           'decision',
           'Reserved broader PDF search',
-          `${pdfContextHits.length} PDF result${pdfContextHits.length === 1 ? '' : 's'} matched ${pdfScopeLabel}; all class PDFs are available to Gemini through a rephrased search tool call if the focused excerpts are irrelevant or insufficient.`,
+          `${pdfContextHits.length} PDF result${pdfContextHits.length === 1 ? '' : 's'} matched ${pdfScopeLabel}; all class PDFs are available to the selected model through a rephrased search tool call if the focused excerpts are irrelevant or insufficient.`,
           {
             count: pdfContextHits.length,
             sourceType: 'pdf',
@@ -554,20 +620,105 @@ export async function POST(
     let pdfToolHits: RetrievalHit[] = [];
     let structuralSources: AskAiSource[] = [];
     const calledTools = new Set<string>();
+    let forcedPdfToolCall = false;
+
+    if (!modelResponse.functionCall && shouldRepairBroadPdfToolDecision(answer, pdfContextHits)) {
+      steps.push(
+        createStep(
+          'broad-pdf-tool-decision-repair',
+          'decision',
+          'Rechecked broader PDF need',
+          `The first model pass did not call the broader PDF search tool after ${pdfContextHits.length} focused PDF result${pdfContextHits.length === 1 ? '' : 's'}, so Ask AI requested an explicit tool decision before finalizing.`,
+          {
+            count: pdfContextHits.length,
+            sourceType: 'pdf',
+            scope: pdfScopeLabel,
+          }
+        )
+      );
+
+      contents = [
+        ...contents,
+        modelResponse.content || {
+          role: 'model',
+          parts: [{ text: answer }],
+        },
+        {
+          role: 'user',
+          parts: [
+            {
+              text: [
+                'Before finalizing, make an explicit broader-PDF retrieval decision.',
+                `The focused PDF search over ${pdfScopeLabel} returned ${pdfContextHits.length} usable PDF excerpt${pdfContextHits.length === 1 ? '' : 's'}.`,
+                'If those focused PDF excerpts do not directly support the student question, call search_class_pdfs now with a rewritten semantic retrieval query over all class PDFs.',
+                'If the existing PDF, video, structural, or web context already directly supports the answer, answer normally without calling a tool.',
+                `Student question: ${latestUserMessage.content}`,
+              ].join('\n'),
+            },
+          ],
+        },
+      ];
+
+      modelResponse = await callAskAiModel(contents, selectedModel, {
+        tools: toolDeclarations,
+      });
+      answer = modelResponse.text;
+    }
+
+    if (!modelResponse.functionCall && shouldForceBroadPdfToolFallback(answer, pdfContextHits)) {
+      forcedPdfToolCall = true;
+      modelResponse = {
+        text: '',
+        functionCall: {
+          name: 'search_class_pdfs',
+          args: {
+            query: latestUserMessage.content,
+          },
+        },
+        content: {
+          role: 'model',
+          parts: [
+            {
+              functionCall: {
+                name: 'search_class_pdfs',
+                args: {
+                  query: latestUserMessage.content,
+                },
+              },
+            },
+          ],
+        },
+      };
+    }
 
     while (modelResponse.functionCall && calledTools.size < 2) {
       const functionCall = modelResponse.functionCall;
       if (calledTools.has(functionCall.name)) break;
       calledTools.add(functionCall.name);
+      const wasForcedPdfToolCall = forcedPdfToolCall && functionCall.name === 'search_class_pdfs';
+      forcedPdfToolCall = false;
 
       let functionResult = '';
 
       if (functionCall.name === 'search_class_pdfs') {
-        const toolQuery =
-          typeof functionCall.args?.query === 'string' &&
-          functionCall.args.query.trim()
-            ? functionCall.args.query.trim()
-            : latestUserMessage.content;
+        const toolDecision = describeToolDecision(functionCall, latestUserMessage.content, modelResponse.text);
+        if (!wasForcedPdfToolCall) {
+          steps.push(
+            createStep(
+              `model-requested-${functionCall.name}-${calledTools.size}`,
+              'decision',
+              toolDecision.title,
+              toolDecision.detail,
+              {
+                query: toolDecision.query,
+                sourceType: toolDecision.sourceType,
+                scope: toolDecision.scope,
+              }
+            )
+          );
+        }
+
+        const toolQuery = getFunctionCallQuery(functionCall, latestUserMessage.content);
         const rawPdfToolHits = await searchAllClassPdfs(request, authHeader, classId, toolQuery);
         pdfToolHits = selectRetrievalHitsByType([rawPdfToolHits], 'pdf', 3);
         steps.push(
@@ -575,7 +726,9 @@ export async function POST(
             'search-class-pdfs-tool',
             'tool',
             'Called PDF search tool',
-            `The selected model requested broader class PDF context; using ${pdfToolHits.length} of ${rawPdfToolHits.length} matching result${rawPdfToolHits.length === 1 ? '' : 's'}.`,
+            wasForcedPdfToolCall
+              ? `Ask AI triggered broader class PDF search because the focused context was empty or unsupported; using ${pdfToolHits.length} of ${rawPdfToolHits.length} matching result${rawPdfToolHits.length === 1 ? '' : 's'}.`
+              : `The selected model requested broader class PDF context; using ${pdfToolHits.length} of ${rawPdfToolHits.length} matching result${rawPdfToolHits.length === 1 ? '' : 's'}.`,
             {
               query: toolQuery,
               count: pdfToolHits.length,
@@ -588,7 +741,34 @@ export async function POST(
           ? buildContext(pdfToolHits, bookTitle)
           : 'No matching PDF passages were found in the class.';
         functionResult = [`Retrieval query: ${toolQuery}`, '', toolContext].join('\n');
+        steps.push(
+          createStep(
+            `returned-${functionCall.name}-result-${calledTools.size}`,
+            'tool',
+            'Returned PDF search results',
+            `Ask AI added ${pdfToolHits.length} broader PDF excerpt${pdfToolHits.length === 1 ? '' : 's'} back into the model conversation for the next reasoning pass.`,
+            {
+              query: toolQuery,
+              count: pdfToolHits.length,
+              sourceType: 'pdf',
+              scope: 'all class PDFs',
+            }
+          )
+        );
       } else if (functionCall.name === 'query_class_structure') {
+        const toolDecision = describeToolDecision(functionCall, latestUserMessage.content, modelResponse.text);
+        steps.push(
+          createStep(
+            `model-requested-${functionCall.name}-${calledTools.size}`,
+            'decision',
+            toolDecision.title,
+            toolDecision.detail,
+            {
+              sourceType: toolDecision.sourceType,
+              scope: toolDecision.scope,
+            }
+          )
+        );
         const structuralResult = await buildClassStructuralContext(authHeader.slice('Bearer '.length).trim(), classId);
         structuralSources = structuralResult.sources;
         functionResult = structuralResult.context || 'No class structure data was found.';
@@ -605,7 +785,32 @@ export async function POST(
             }
           )
         );
+        steps.push(
+          createStep(
+            `returned-${functionCall.name}-result-${calledTools.size}`,
+            'tool',
+            'Returned class structure results',
+            `Ask AI added ${structuralResult.sources.length} structural source summary back into the model conversation for the next reasoning pass.`,
+            {
+              count: structuralResult.sources.length,
+              sourceType: 'structural',
+              scope: 'Supabase class database',
+            }
+          )
+        );
       } else {
+        const toolDecision = describeToolDecision(functionCall, latestUserMessage.content, modelResponse.text);
+        steps.push(
+          createStep(
+            `model-requested-${functionCall.name}-${calledTools.size}`,
+            'decision',
+            toolDecision.title,
+            toolDecision.detail,
+            {
+              scope: toolDecision.scope,
+            }
+          )
+        );
         break;
       }
 
