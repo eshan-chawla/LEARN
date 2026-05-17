@@ -1,11 +1,11 @@
 'use client';
 
 import {
-  ASK_AI_GEMINI_MODELS,
-  DEFAULT_ASK_AI_GEMINI_MODEL,
-  getAskAiGeminiModelLabel,
-  normalizeAskAiGeminiModel,
-  type AskAiGeminiModel,
+  ASK_AI_MODELS,
+  DEFAULT_ASK_AI_MODEL,
+  getAskAiModelLabel,
+  normalizeAskAiModel,
+  type AskAiModel,
 } from '@/lib/ask-ai/models';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
@@ -311,13 +311,13 @@ export function BookAskAIPanel({
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({});
   const [citationTabs, setCitationTabs] = useState<Record<string, CitationTab>>({});
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<AskAiGeminiModel>(DEFAULT_ASK_AI_GEMINI_MODEL);
+  const [selectedModel, setSelectedModel] = useState<AskAiModel>(DEFAULT_ASK_AI_MODEL);
   const [useExternalSources, setUseExternalSources] = useState(false);
   const [historyReady, setHistoryReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const settingsMenuRef = useRef<HTMLDivElement | null>(null);
-  const storageKey = `smart-learn-book-ask-ai-session:${classSlug}`;
+  const storageKey = `smart-learn-ask-ai-session:${classSlug}:${sourceKind}:${bookId}`;
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
@@ -337,7 +337,7 @@ export function BookAskAIPanel({
     if (!storedValue) {
       setMessages([]);
       setInput('');
-      setSelectedModel(DEFAULT_ASK_AI_GEMINI_MODEL);
+      setSelectedModel(DEFAULT_ASK_AI_MODEL);
       setUseExternalSources(false);
       setHistoryReady(true);
       return;
@@ -356,11 +356,11 @@ export function BookAskAIPanel({
       setMessages(normalizeMessages(parsed.messages));
       setInput(typeof parsed.input === 'string' ? parsed.input : '');
       setUseExternalSources(normalizeUseExternalSources(parsed.useExternalSources, parsed.resourceScopes));
-      setSelectedModel(normalizeAskAiGeminiModel(parsed.selectedModel ?? parsed.model));
+      setSelectedModel(normalizeAskAiModel(parsed.selectedModel ?? parsed.model));
     } catch {
       setMessages([]);
       setInput('');
-      setSelectedModel(DEFAULT_ASK_AI_GEMINI_MODEL);
+      setSelectedModel(DEFAULT_ASK_AI_MODEL);
       setUseExternalSources(false);
     } finally {
       setHistoryReady(true);
@@ -496,7 +496,7 @@ export function BookAskAIPanel({
   } as CSSProperties;
 
   const handleModelChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setSelectedModel(normalizeAskAiGeminiModel(event.target.value));
+    setSelectedModel(normalizeAskAiModel(event.target.value));
   };
 
   const getPdfSourceLabel = (source: ChatSource) => {
@@ -593,7 +593,7 @@ export function BookAskAIPanel({
                 <div className="min-w-0">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-stone-400">Settings</p>
                   <p className="mt-1 truncate text-sm text-stone-600">
-                    {getAskAiGeminiModelLabel(selectedModel)}
+                    {getAskAiModelLabel(selectedModel)}
                   </p>
                 </div>
                 <svg
@@ -616,9 +616,9 @@ export function BookAskAIPanel({
                       value={selectedModel}
                       onChange={handleModelChange}
                       className="mt-1 w-full appearance-none bg-transparent pr-7 text-sm text-stone-700 outline-none"
-                      title={`Gemini model: ${getAskAiGeminiModelLabel(selectedModel)}`}
+                      title={`Reasoning model: ${getAskAiModelLabel(selectedModel)}`}
                     >
-                      {ASK_AI_GEMINI_MODELS.map((model) => (
+                      {ASK_AI_MODELS.map((model) => (
                         <option key={model.id} value={model.id}>
                           {model.label}
                         </option>

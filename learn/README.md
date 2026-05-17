@@ -63,9 +63,16 @@ NEXT_PUBLIC_SUPABASE_URL=your-supabase-project-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
 
-# Gemini Configuration (for Ask AI on Vercel)
+# Ask AI Configuration
 GEMINI_API_KEY=your-gemini-api-key
-GEMINI_CHAT_MODEL=gemini-2.5-flash-lite
+ASK_AI_CHAT_MODEL=gemini-2.5-flash-lite
+GEMINI_CHAT_MODEL=gemini-2.5-flash-lite # optional legacy fallback
+
+# AWS Bedrock Configuration (for Llama Ask AI models)
+AWS_REGION=us-east-1
+BEDROCK_AWS_REGION=us-east-1 # optional override
+BEDROCK_LLAMA_70B_MODEL_ID=us.meta.llama3-3-70b-instruct-v1:0
+BEDROCK_LLAMA_8B_MODEL_ID=us.meta.llama3-1-8b-instruct-v1:0
 
 # Modal Configuration (for PDF and video processing)
 MODAL_WEBHOOK_URL=your-modal-webhook-url

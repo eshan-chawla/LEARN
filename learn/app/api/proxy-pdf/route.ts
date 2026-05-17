@@ -31,10 +31,11 @@ export async function GET(request: NextRequest) {
       },
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : 'Failed to proxy PDF';
     console.error('Error proxying PDF:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to proxy PDF' },
+      { error: message },
       { status: 500 }
     );
   }

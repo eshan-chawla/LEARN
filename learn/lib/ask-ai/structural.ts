@@ -109,6 +109,7 @@ export async function buildClassStructuralContext(accessToken: string, classId: 
   if (!classResult.data) {
     return {
       context: '',
+      detail: 'Supabase class database lookup returned no class row, so no class structure context was added.',
       sources: [] as StructuralSource[],
     };
   }
@@ -166,9 +167,15 @@ export async function buildClassStructuralContext(accessToken: string, classId: 
     `Recordings with known duration: ${knownDurationRecordings.length}`,
     recordingLines.length > 0 ? `Recording list:\n${recordingLines.join('\n')}` : 'Recording list: none',
   ].join('\n');
+  const detail = [
+    'Used the Supabase class database context builder.',
+    'Queried tables: classes (id, name, created_at), book_sections (id, title, position), books (title, section, file size, processing status, position, upload date), and recordings (title, duration, processing status, upload date).',
+    `Model received: class "${classResult.data.name}", ${books.length} book${books.length === 1 ? '' : 's'} across ${sections.length} section${sections.length === 1 ? '' : 's'}, book statuses (${formatStatusCounts(bookStatusCounts)}), ${recordings.length} recording${recordings.length === 1 ? '' : 's'}, recording statuses (${formatStatusCounts(recordingStatusCounts)}), and ${formatDuration(totalRecordingSeconds)} of known recording duration.`,
+  ].join(' ');
 
   return {
     context,
+    detail,
     sources: [
       {
         pageNumber: null,

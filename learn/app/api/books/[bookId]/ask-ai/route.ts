@@ -6,13 +6,18 @@ import {
 } from '@/lib/ask-ai/duckduckgo';
 import { buildAskAiGuardrailPrompt } from '@/lib/ask-ai/guardrails';
 import {
-  DEFAULT_ASK_AI_GEMINI_MODEL,
-  normalizeAskAiGeminiModel,
-  type AskAiGeminiModel,
+  DEFAULT_ASK_AI_MODEL,
+  normalizeAskAiModel,
 } from '@/lib/ask-ai/models';
 import { buildClassStructuralContext } from '@/lib/ask-ai/structural';
+import {
+  callAskAiModel,
+  type AskAiContent,
+  type AskAiFunctionCall,
+  type AskAiFunctionDeclaration,
+} from '@/lib/ask-ai/chat-provider';
 
-export const runtime = 'edge';
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type ChatRole = 'user' | 'assistant';
@@ -76,32 +81,7 @@ interface RetrievalTarget {
   };
 }
 
-interface GeminiFunctionCall {
-  id?: string;
-  name: string;
-  args?: {
-    query?: unknown;
-  };
-}
-
-interface GeminiContentPart {
-  text?: string;
-  functionCall?: GeminiFunctionCall;
-  functionResponse?: {
-    id?: string;
-    name: string;
-    response: {
-      result: string;
-    };
-  };
-}
-
-interface GeminiContent {
-  role: 'user' | 'model';
-  parts: GeminiContentPart[];
-}
-
-const SEARCH_CLASS_PDFS_FUNCTION = {
+const SEARCH_CLASS_PDFS_FUNCTION: AskAiFunctionDeclaration = {
   name: 'search_class_pdfs',
   description:
     'Search all indexed PDF passages in this class. Call this only when the current document, indexed video, class structure, and enabled web context are insufficient. Rewrite the student question into a focused retrieval query with concrete terms.',
@@ -114,6 +94,16 @@ const SEARCH_CLASS_PDFS_FUNCTION = {
       },
     },
     required: ['query'],
+  },
+};
+
+const QUERY_CLASS_STRUCTURE_FUNCTION: AskAiFunctionDeclaration = {
+  name: 'query_class_structure',
+  description:
+    'Query the Supabase class database for structured class information. Call this only when the student asks about class organization, book or recording lists, sections/modules, processing statuses, upload dates, file sizes, or recording durations.',
+  parameters: {
+    type: 'OBJECT',
+    properties: {},
   },
 };
 
@@ -308,8 +298,8 @@ function buildSources(
   return [...uploadedSources, ...webSources, ...structuralSources];
 }
 
-function describeResourceScope(bookTitle: string) {
-  return `the current book, ${bookTitle}, indexed class recordings, class structure data, and the all-class PDF search tool when needed`;
+function describeResourceScope(bookTitle: string, pdfScopeLabel: string) {
+  return `${pdfScopeLabel} centered on ${bookTitle}, indexed class recordings, the class structure query tool when needed, and the all-class PDF search tool when needed`;
 }
 
 function createStep(
@@ -402,72 +392,6 @@ async function searchAllClassPdfs(
   });
 }
 
-async function callGemini(
-  contents: GeminiContent[],
-  model: AskAiGeminiModel,
-  options: { tools?: unknown[] } = {}
-) {
-  const apiKey = process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error('Missing GEMINI_API_KEY on the server');
-  }
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        generationConfig: {
-          temperature: 0.2,
-          topP: 0.9,
-          maxOutputTokens: 900,
-        },
-        contents,
-        ...(options.tools ? { tools: options.tools } : {}),
-      }),
-      cache: 'no-store',
-    }
-  );
-
-  const payload = await response.json().catch(() => null) as
-    | {
-        candidates?: Array<{
-          content?: {
-            parts?: GeminiContentPart[];
-          };
-          finishReason?: string;
-        }>;
-        error?: { message?: string };
-      }
-    | null;
-
-  if (!response.ok) {
-    throw new Error(payload?.error?.message || 'Gemini request failed');
-  }
-
-  const answer = payload?.candidates?.[0]?.content?.parts
-    ?.map((part) => part.text || '')
-    .join('')
-    .trim();
-  const content = payload?.candidates?.[0]?.content
-    ? ({
-        role: 'model',
-        parts: payload.candidates[0].content.parts || [],
-      } satisfies GeminiContent)
-    : undefined;
-  const functionCall = payload?.candidates?.[0]?.content?.parts?.find((part) => part.functionCall)?.functionCall;
-
-  if (!answer && !functionCall) {
-    throw new Error('Gemini returned an empty response');
-  }
-
-  return { text: answer || '', functionCall, content };
-}
-
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ bookId: string }> }
@@ -486,11 +410,11 @@ export async function POST(
     const resourceScopes = normalizeResourceScopes(body.resourceScopes);
     const moduleBookIds = normalizeStringList(body.moduleBookIds);
     const includeWebData = normalizeUseExternalSources(body, resourceScopes);
-    const defaultModel = normalizeAskAiGeminiModel(
-      process.env.GEMINI_CHAT_MODEL,
-      DEFAULT_ASK_AI_GEMINI_MODEL
+    const defaultModel = normalizeAskAiModel(
+      process.env.ASK_AI_CHAT_MODEL || process.env.GEMINI_CHAT_MODEL,
+      DEFAULT_ASK_AI_MODEL
     );
-    const selectedModel = normalizeAskAiGeminiModel(body.model, defaultModel);
+    const selectedModel = normalizeAskAiModel(body.model, defaultModel);
 
     if (!classId) {
       return NextResponse.json({ error: 'Missing required field: classId' }, { status: 400 });
@@ -500,7 +424,7 @@ export async function POST(
     const steps: AskAiStep[] = [];
     const pdfSourceIds = Array.from(new Set([bookId, ...moduleBookIds]));
     const pdfScopeLabel = moduleBookIds.length > 0 ? 'current module PDFs' : 'current book PDF';
-    const [initialPdfHits, initialVideoHits, webResults, structuralResult] = await Promise.all([
+    const [initialPdfHits, initialVideoHits, webResults] = await Promise.all([
       fetchRetrievalHits(authHeader, {
         url: new URL(`/api/retrieval/class/${classId}/pdf`, request.nextUrl.origin),
         body: {
@@ -517,10 +441,9 @@ export async function POST(
         },
       }),
       includeWebData ? searchDuckDuckGoContext(latestUserMessage.content) : Promise.resolve([]),
-      buildClassStructuralContext(authHeader.slice('Bearer '.length).trim(), classId),
     ]);
 
-    let pdfContextHits = selectRetrievalHitsByType([initialPdfHits], 'pdf', 3);
+    const pdfContextHits = selectRetrievalHitsByType([initialPdfHits], 'pdf', 3);
     const videoContextHits = selectRetrievalHitsByType([initialVideoHits], 'video', 3);
 
     steps.push(
@@ -550,30 +473,13 @@ export async function POST(
       )
     );
 
-    if (pdfContextHits.length === 0) {
-      const broadPdfHits = await searchAllClassPdfs(request, authHeader, classId, latestUserMessage.content);
-      pdfContextHits = selectRetrievalHitsByType([broadPdfHits], 'pdf', 3);
+    if (pdfContextHits.length < 3) {
       steps.push(
         createStep(
-          'default-broad-pdf-search',
+          'broad-pdf-tool-reserved',
           'decision',
-          'Expanded PDF context',
-          `No ${pdfScopeLabel} matched, so Ask AI searched all class PDFs before asking Gemini; using ${pdfContextHits.length} result${pdfContextHits.length === 1 ? '' : 's'}.`,
-          {
-            query: latestUserMessage.content,
-            count: pdfContextHits.length,
-            sourceType: 'pdf',
-            scope: 'all class PDFs',
-          }
-        )
-      );
-    } else if (pdfContextHits.length < 3) {
-      steps.push(
-        createStep(
-          'broad-pdf-shortfall-held',
-          'decision',
-          'Kept PDF scope focused',
-          `Only ${pdfContextHits.length} PDF result${pdfContextHits.length === 1 ? '' : 's'} matched ${pdfScopeLabel}; broad class PDFs were reserved for the model's search tool if needed.`,
+          'Reserved broader PDF search',
+          `${pdfContextHits.length} PDF result${pdfContextHits.length === 1 ? '' : 's'} matched ${pdfScopeLabel}; all class PDFs are available to Gemini through a rephrased search tool call if the focused excerpts are irrelevant or insufficient.`,
           {
             count: pdfContextHits.length,
             sourceType: 'pdf',
@@ -597,35 +503,26 @@ export async function POST(
           sourceType: 'web',
           scope: 'DuckDuckGo',
         }
-      ),
-      createStep(
-        'class-structure',
-        'structure',
-        'Loaded class structure',
-        structuralResult.context ? 'Class data was included for books, recordings, sections, and processing status.' : 'No class structure data was available.',
-        {
-          count: structuralResult.sources.length,
-          sourceType: 'structural',
-          scope: 'class database',
-        }
       )
     );
 
     const hits = [...pdfContextHits, ...videoContextHits];
-    const resourceScopeLabel = describeResourceScope(bookTitle);
+    const resourceScopeLabel = describeResourceScope(bookTitle, pdfScopeLabel);
 
     const prompt = [
       'You are Smart Learn AI inside a book reader.',
       buildAskAiGuardrailPrompt(resourceScopeLabel, { includeWebData, includeStructuralData: true }),
       'Use short paragraphs. Use flat bullets only if they make the answer clearer.',
-      'Start from the focused PDF excerpts, indexed class recordings, class structure data, and enabled web context.',
-      'If that context is insufficient, call search_class_pdfs once with a rewritten retrieval query. Do not call it when the provided context already answers the question.',
+      'Start from the focused PDF excerpts, indexed class recordings, and enabled web context.',
+      'Critically evaluate whether the focused PDF excerpts are relevant to the student question.',
+      'If the focused PDF excerpts are irrelevant or insufficient, call search_class_pdfs once with a rewritten retrieval query to search all class PDFs. Do not call it when the provided context already answers the question.',
+      'If the student asks about class organization, sections/modules, uploaded books, recordings, processing statuses, upload dates, file sizes, or recording duration, call query_class_structure. Do not call it for conceptual questions already answered by the retrieved excerpts.',
       '',
       `Current book title: ${bookTitle}`,
       `Resource scope: ${resourceScopeLabel}`,
       `Web data: ${includeWebData ? 'Enabled by the student' : 'Disabled'}`,
-      'Structural search: Always enabled',
-      `Gemini model: ${selectedModel}`,
+      'Structural search: Available as an optional tool call',
+      `Reasoning model: ${selectedModel}`,
       '',
       'Recent conversation:',
       summarizeConversation(messages),
@@ -639,81 +536,132 @@ export async function POST(
             webResults.length > 0 ? formatWebSearchContext(webResults) : 'No DuckDuckGo web context was found.',
           ]
         : []),
-      '',
-      'Class structure data from database:',
-      structuralResult.context || 'No class structure data was found.',
-      '',
       `Student's latest question: ${latestUserMessage.content}`,
     ].join('\n');
 
-    const initialContents: GeminiContent[] = [
+    const initialContents: AskAiContent[] = [
       {
         role: 'user',
         parts: [{ text: prompt }],
       },
     ];
-    const firstGeminiResponse = await callGemini(initialContents, selectedModel, {
-      tools: [{ functionDeclarations: [SEARCH_CLASS_PDFS_FUNCTION] }],
+    const toolDeclarations = [SEARCH_CLASS_PDFS_FUNCTION, QUERY_CLASS_STRUCTURE_FUNCTION];
+    let contents = initialContents;
+    let modelResponse = await callAskAiModel(contents, selectedModel, {
+      tools: toolDeclarations,
     });
-    let answer = firstGeminiResponse.text;
+    let answer = modelResponse.text;
     let pdfToolHits: RetrievalHit[] = [];
+    let structuralSources: AskAiSource[] = [];
+    const calledTools = new Set<string>();
 
-    if (firstGeminiResponse.functionCall?.name === 'search_class_pdfs') {
-      const toolQuery =
-        typeof firstGeminiResponse.functionCall.args?.query === 'string' &&
-        firstGeminiResponse.functionCall.args.query.trim()
-          ? firstGeminiResponse.functionCall.args.query.trim()
-          : latestUserMessage.content;
-      const rawPdfToolHits = await searchAllClassPdfs(request, authHeader, classId, toolQuery);
-      pdfToolHits = selectRetrievalHitsByType([rawPdfToolHits], 'pdf', 3);
-      steps.push(
-        createStep(
-          'search-class-pdfs-tool',
-          'tool',
-          'Called PDF search tool',
-          `Gemini requested broader class PDF context; using ${pdfToolHits.length} of ${rawPdfToolHits.length} matching result${rawPdfToolHits.length === 1 ? '' : 's'}.`,
-          {
-            query: toolQuery,
-            count: pdfToolHits.length,
-            sourceType: 'pdf',
-            scope: 'all class PDFs',
-          }
-        )
-      );
-      const toolContext = pdfToolHits.length > 0
-        ? buildContext(pdfToolHits, bookTitle)
-        : 'No matching PDF passages were found in the class.';
-      const finalGeminiResponse = await callGemini(
+    while (modelResponse.functionCall && calledTools.size < 2) {
+      const functionCall = modelResponse.functionCall;
+      if (calledTools.has(functionCall.name)) break;
+      calledTools.add(functionCall.name);
+
+      let functionResult = '';
+
+      if (functionCall.name === 'search_class_pdfs') {
+        const toolQuery =
+          typeof functionCall.args?.query === 'string' &&
+          functionCall.args.query.trim()
+            ? functionCall.args.query.trim()
+            : latestUserMessage.content;
+        const rawPdfToolHits = await searchAllClassPdfs(request, authHeader, classId, toolQuery);
+        pdfToolHits = selectRetrievalHitsByType([rawPdfToolHits], 'pdf', 3);
+        steps.push(
+          createStep(
+            'search-class-pdfs-tool',
+            'tool',
+            'Called PDF search tool',
+            `The selected model requested broader class PDF context; using ${pdfToolHits.length} of ${rawPdfToolHits.length} matching result${rawPdfToolHits.length === 1 ? '' : 's'}.`,
+            {
+              query: toolQuery,
+              count: pdfToolHits.length,
+              sourceType: 'pdf',
+              scope: 'all class PDFs',
+            }
+          )
+        );
+        const toolContext = pdfToolHits.length > 0
+          ? buildContext(pdfToolHits, bookTitle)
+          : 'No matching PDF passages were found in the class.';
+        functionResult = [`Retrieval query: ${toolQuery}`, '', toolContext].join('\n');
+      } else if (functionCall.name === 'query_class_structure') {
+        const structuralResult = await buildClassStructuralContext(authHeader.slice('Bearer '.length).trim(), classId);
+        structuralSources = structuralResult.sources;
+        functionResult = structuralResult.context || 'No class structure data was found.';
+        steps.push(
+          createStep(
+            'query-class-structure-tool',
+            'tool',
+            'Queried class structure',
+            structuralResult.detail,
+            {
+              count: structuralResult.sources.length,
+              sourceType: 'structural',
+              scope: 'Supabase class database',
+            }
+          )
+        );
+      } else {
+        break;
+      }
+
+      contents = [
+        ...contents,
+        modelResponse.content || {
+          role: 'model',
+          parts: [{ functionCall: functionCall as AskAiFunctionCall }],
+        },
+        {
+          role: 'user',
+          parts: [
+            {
+              functionResponse: {
+                ...(functionCall.id ? { id: functionCall.id } : {}),
+                name: functionCall.name,
+                response: {
+                  result: functionResult,
+                },
+              },
+            },
+          ],
+        },
+      ];
+
+      modelResponse = await callAskAiModel(contents, selectedModel, {
+        tools: toolDeclarations,
+      });
+      answer = modelResponse.text;
+    }
+
+    if (!answer && modelResponse.functionCall) {
+      const finalModelResponse = await callAskAiModel(
         [
-          ...initialContents,
-          firstGeminiResponse.content || {
-            role: 'model',
-            parts: [{ functionCall: firstGeminiResponse.functionCall }],
-          },
+          ...contents,
           {
             role: 'user',
             parts: [
               {
-                functionResponse: {
-                  ...(firstGeminiResponse.functionCall.id ? { id: firstGeminiResponse.functionCall.id } : {}),
-                  name: 'search_class_pdfs',
-                  response: {
-                    result: [`Retrieval query: ${toolQuery}`, '', toolContext].join('\n'),
-                  },
-                },
+                text: 'No additional tool calls are available. Generate the final answer using only the retrieved context and any tool results already provided.',
               },
             ],
           },
         ],
         selectedModel
       );
-      answer = finalGeminiResponse.text;
+      answer = finalModelResponse.text;
+    }
+
+    if (calledTools.size > 0) {
       steps.push(
         createStep(
           'final-answer-after-tool',
           'generation',
           'Generated final answer',
-          'Gemini generated the answer after receiving the PDF search tool results.',
+          `The selected model generated the answer after receiving ${calledTools.size} optional tool result${calledTools.size === 1 ? '' : 's'}.`,
           {
             count: mergeRetrievalHits([hits, pdfToolHits], 10).length,
             scope: 'balanced context plus tool results',
@@ -726,7 +674,7 @@ export async function POST(
           'final-answer',
           'generation',
           'Generated final answer',
-          'Gemini answered from the retrieved PDF/video context, class structure, and enabled web context without calling a broader PDF search tool.',
+          'The selected model answered from the retrieved PDF/video context and enabled web context without optional tool calls.',
           {
             count: hits.length,
             scope: 'balanced initial context',
@@ -736,7 +684,7 @@ export async function POST(
     }
 
     if (!answer) {
-      throw new Error('Gemini returned an empty response');
+      throw new Error('The selected model returned an empty response');
     }
 
     return NextResponse.json({
@@ -744,7 +692,7 @@ export async function POST(
       sources: buildSources(
         mergeRetrievalHits([hits, pdfToolHits], 10),
         includeWebData ? webResults : [],
-        structuralResult.sources
+        structuralSources
       ),
       steps,
     });

@@ -48,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signUp = async (email: string, password: string, name?: string) => {
-    const { data, error } = await authSignUp(email, password, name);
+    const { error } = await authSignUp(email, password, name);
 
     if (error) {
       return { success: false, error };
