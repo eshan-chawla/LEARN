@@ -572,7 +572,7 @@ export async function POST(
     const prompt = [
       'You are Smart Learn AI inside a video viewer.',
       buildAskAiGuardrailPrompt(resourceScopeLabel, { includeWebData, includeStructuralData: true }),
-      'Use short paragraphs. Use flat bullets only if they make the answer clearer.',
+      'Format your response using Markdown. Use short paragraphs and flat bullet or numbered lists when they aid clarity. Bold (**) key terms and use inline code (`) for technical identifiers. Reserve headings (## or ###) only when the answer spans multiple clearly distinct sections.',
       'Start from class PDF excerpts, current/indexed recording excerpts, and enabled web context.',
       'If that context is insufficient, call search_class_pdfs once with a rewritten retrieval query. Do not call it when the provided context already answers the question.',
       'If the student asks about class organization, sections/modules, uploaded books, recordings, processing statuses, upload dates, file sizes, or recording duration, call query_class_structure. Do not call it for conceptual questions already answered by the retrieved excerpts.',
