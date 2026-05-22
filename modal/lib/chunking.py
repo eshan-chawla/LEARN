@@ -3,8 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
+import io
 
-def extract_page_chunks(pdf_path: Path, chunk_size: int = 500, overlap: int = 50) -> List[Dict[str, Any]]:
+def extract_page_chunks(
+    pdf_path: Path,
+    chunk_size: int = 500,
+    overlap: int = 50,
+    gemini_api_key: str | None = None,
+) -> List[Dict[str, Any]]:
     from pypdf import PdfReader
 
     reader = PdfReader(str(pdf_path))
@@ -12,22 +18,46 @@ def extract_page_chunks(pdf_path: Path, chunk_size: int = 500, overlap: int = 50
 
     for page_index, page in enumerate(reader.pages):
         page_text = (page.extract_text() or "").strip()
+
+        if not page_text and gemini_api_key:
+            page_text = _ocr_page_with_gemini(pdf_path, page_index, gemini_api_key)
+
         if not page_text:
             continue
 
         for page_chunk_index, chunk_text in enumerate(
             split_into_chunks(page_text, chunk_size=chunk_size, overlap=overlap)
         ):
-            chunks.append(
-                {
-                    "page_number": page_index + 1,
-                    "page_chunk_index": page_chunk_index,
-                    "text": chunk_text,
-                }
-            )
+            chunks.append({
+                "page_number": page_index + 1,
+                "page_chunk_index": page_chunk_index,
+                "text": chunk_text,
+            })
 
     return chunks
 
+
+def _ocr_page_with_gemini(pdf_path: Path, page_index: int, api_key: str) -> str:
+    from pypdf import PdfReader, PdfWriter
+    from google import genai
+    from google.genai import types
+
+    reader = PdfReader(str(pdf_path))
+    writer = PdfWriter()
+    writer.add_page(reader.pages[page_index])
+    buf = io.BytesIO()
+    writer.write(buf)
+    buf.seek(0)
+
+    client = genai.Client(api_key=api_key)
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        contents=[
+            types.Part.from_bytes(data=buf.read(), mime_type="application/pdf"),
+            "Extract all text from this page exactly as it appears. Return only the text, no commentary.",
+        ],
+    )
+    return (response.text or "").strip()
 
 def split_into_chunks(text: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
     words = text.split()

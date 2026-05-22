@@ -89,7 +89,10 @@ def process_pdf_impl(
 
         s3.download_file(bucket_name, storage_path, str(temp_path))
 
-        page_chunks = extract_page_chunks(temp_path)
+        page_chunks = extract_page_chunks(
+            temp_path,
+            gemini_api_key=os.environ.get("GEMINI_API_KEY"),
+        )
         if not page_chunks:
             raise ValueError("No extractable text found in PDF")
 
