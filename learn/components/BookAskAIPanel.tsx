@@ -8,6 +8,7 @@ import {
   type AskAiModel,
 } from '@/lib/ask-ai/models';
 import { supabase } from '@/lib/supabase';
+import { MarkdownContent } from '@/components/MarkdownContent';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type CSSProperties, type ChangeEvent, type MouseEvent as ReactMouseEvent } from 'react';
 
@@ -782,9 +783,15 @@ export function BookAskAIPanel({
                   </div>
                 )}
 
-                <div className={`mt-2 whitespace-pre-wrap text-sm leading-6 ${message.role === 'user' ? 'text-stone-50' : 'text-stone-700'}`}>
-                  {message.content}
-                </div>
+                {message.role === 'user' ? (
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-stone-50">
+                    {message.content}
+                  </p>
+                ) : (
+                  <MarkdownContent className="mt-2 text-sm leading-6 text-stone-700">
+                    {message.content}
+                  </MarkdownContent>
+                )}
 
                 {messageSources.length > 0 && (
                   <div className="mt-4 space-y-2">
