@@ -30,8 +30,10 @@ image = (
         "fastapi[standard]==0.115.0",
         "google-genai==1.62.0",
         "httpx>=0.27,<1",
+        "pymupdf>=1.24.0",
         "pypdf==4.2.0",
         "qdrant-client==1.7.0",
+        "surya-ocr>=0.4.0",
     )
     .add_local_dir(str(BASE_DIR / "jobs"), remote_path="/root/jobs")
     .add_local_dir(str(BASE_DIR / "webhooks"), remote_path="/root/webhooks")
@@ -42,7 +44,6 @@ process_pdf = app.function(
     image=image,
     secrets=[
         modal.Secret.from_name("aws-s3-credentials"),
-        modal.Secret.from_name("gemini-api-key"),
         modal.Secret.from_name("supabase-credentials"),
         modal.Secret.from_name("qdrant-credentials"),
         modal.Secret.from_name("modal-webhook-secret"),
