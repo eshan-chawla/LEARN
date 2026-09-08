@@ -3,6 +3,74 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Sequence
 
+# Module-level model cache — loaded once per Modal container execution so
+# that every image-only page in the same PDF shares the same model weights.
+_surya_models: Dict[str, Any] | None = None
+
+
+def _load_surya_models() -> Dict[str, Any]:
+    """Load and cache Surya detection and recognition models.
+
+    Weights are downloaded from HuggingFace on first call and held in
+    memory for the lifetime of the Modal container.
+    """
+    global _surya_models
+    if _surya_models is not None:
+        return _surya_models
+
+    from surya.model.detection.segformer import load_model as load_det_model
+    from surya.model.detection.segformer import load_processor as load_det_processor
+    from surya.model.recognition.model import load_model as load_rec_model
+    from surya.model.recognition.processor import load_processor as load_rec_processor
+
+    _surya_models = {
+        "det_model": load_det_model(),
+        "det_processor": load_det_processor(),
+        "rec_model": load_rec_model(),
+        "rec_processor": load_rec_processor(),
+    }
+    return _surya_models
+
+
+def _ocr_page_with_surya(pdf_path: Path, page_index: int) -> str:
+    """Render a single PDF page to an image and extract text with Surya OCR.
+
+    PyMuPDF renders at 2x scale (~144 DPI) for better recognition accuracy.
+    No temporary files are written — the pixmap is converted to a PIL image
+    in memory before being passed to Surya.
+    """
+    import fitz  # PyMuPDF
+    from PIL import Image
+    from surya.ocr import run_ocr
+
+    models = _load_surya_models()
+
+    doc = fitz.open(str(pdf_path))
+    try:
+        pix = doc[page_index].get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+    finally:
+        doc.close()
+
+    image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+    predictions = run_ocr(
+        [image],
+        [["en"]],
+        models["det_model"],
+        models["det_processor"],
+        models["rec_model"],
+        models["rec_processor"],
+    )
+
+    if not predictions:
+        return ""
+
+    return " ".join(
+        line.text
+        for line in predictions[0].text_lines
+        if line.text.strip()
+    )
+
 
 def extract_page_chunks(pdf_path: Path, chunk_size: int = 500, overlap: int = 50) -> List[Dict[str, Any]]:
     from pypdf import PdfReader
@@ -12,6 +80,10 @@ def extract_page_chunks(pdf_path: Path, chunk_size: int = 500, overlap: int = 50
 
     for page_index, page in enumerate(reader.pages):
         page_text = (page.extract_text() or "").strip()
+
+        if not page_text:
+            page_text = _ocr_page_with_surya(pdf_path, page_index)
+
         if not page_text:
             continue
 
