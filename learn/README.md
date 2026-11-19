@@ -68,11 +68,16 @@ GEMINI_API_KEY=your-gemini-api-key
 ASK_AI_CHAT_MODEL=gemini-2.5-flash-lite
 GEMINI_CHAT_MODEL=gemini-2.5-flash-lite # optional legacy fallback
 
-# AWS Bedrock Configuration (for Llama Ask AI models)
+# Open-weight GLM model via an OpenAI-compatible endpoint (optional)
+GLM_API_KEY=your-glm-api-key
+GLM_MODEL_ID=your-glm-flash-model-id
+GLM_BASE_URL=https://api.z.ai/api/paas/v4
+
+# AWS S3 (PDF, video, transcript storage)
 AWS_REGION=us-east-1
-BEDROCK_AWS_REGION=us-east-1 # optional override
-BEDROCK_LLAMA_70B_MODEL_ID=us.meta.llama3-3-70b-instruct-v1:0
-BEDROCK_LLAMA_8B_MODEL_ID=us.meta.llama3-1-8b-instruct-v1:0
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+AWS_S3_RECORDINGS_BUCKET=your-bucket-name
 
 # Modal Configuration (for PDF and video processing)
 MODAL_WEBHOOK_URL=your-modal-webhook-url

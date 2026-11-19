@@ -1,4 +1,4 @@
-export type AskAiModelProvider = 'gemini' | 'bedrock';
+export type AskAiModelProvider = 'gemini' | 'glm';
 
 export const DEFAULT_ASK_AI_MODEL = 'gemini-2.5-flash-lite';
 export const DEFAULT_ASK_AI_GEMINI_MODEL = DEFAULT_ASK_AI_MODEL;
@@ -23,16 +23,10 @@ export const ASK_AI_MODELS = [
     description: 'Best for hard questions',
   },
   {
-    id: 'bedrock:llama-3.3-70b-instruct',
-    provider: 'bedrock',
-    label: 'Llama 70B',
-    description: 'AWS Bedrock, stronger Llama reasoning',
-  },
-  {
-    id: 'bedrock:llama-3.1-8b-instruct',
-    provider: 'bedrock',
-    label: 'Llama 8B',
-    description: 'AWS Bedrock, faster small Llama model',
+    id: 'glm-flash',
+    provider: 'glm',
+    label: 'GLM Flash',
+    description: 'Open-weight model (set GLM_MODEL_ID)',
   },
 ] as const;
 

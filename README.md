@@ -47,12 +47,4 @@ The full environment-variable list, architecture walkthrough (PDF processing flo
 - **Processing**: Modal serverless functions (PDF extraction, Whisper transcription)
 - **Embeddings**: Gemini `gemini-embedding-001`
 - **Vector Storage**: Qdrant
-- **Chat Models**: Gemini and Llama via AWS Bedrock (multi-model evaluation)
-
-## Development Notes
-
-To resume the Codex session associated with this project:
-
-```bash
-codex resume 019cd8b8-1d45-71e3-874b-c5122235b0dc
-```
+- **Chat Models**: Gemini 2.5 (Flash-Lite / Flash / Pro) and an open-weight GLM Flash model via an OpenAI-compatible API

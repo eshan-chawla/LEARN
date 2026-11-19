@@ -1,11 +1,3 @@
-import {
-  BedrockRuntimeClient,
-  ConverseCommand,
-  type ContentBlock,
-  type Message as BedrockMessage,
-  type Tool,
-} from '@aws-sdk/client-bedrock-runtime';
-import type { DocumentType } from '@smithy/types';
 import { getAskAiModelConfig, type AskAiModel } from '@/lib/ask-ai/models';
 
 export interface AskAiFunctionDeclaration {
@@ -47,17 +39,16 @@ export interface AskAiModelResponse {
   content?: AskAiContent;
 }
 
-function getBedrockModelId(model: AskAiModel) {
-  if (model === 'bedrock:llama-3.3-70b-instruct') {
-    return process.env.BEDROCK_LLAMA_70B_MODEL_ID || 'us.meta.llama3-3-70b-instruct-v1:0';
-  }
-
-  if (model === 'bedrock:llama-3.1-8b-instruct') {
-    return process.env.BEDROCK_LLAMA_8B_MODEL_ID || 'us.meta.llama3-1-8b-instruct-v1:0';
-  }
-
-  return model;
+export interface AskAiCallOptions {
+  tools?: AskAiFunctionDeclaration[];
+  temperature?: number;
+  maxOutputTokens?: number;
+  /** Ask the provider for a bare JSON object (no prose, no code fences). Callers still validate. */
+  json?: boolean;
 }
+
+const DEFAULT_TEMPERATURE = 0.2;
+const DEFAULT_MAX_OUTPUT_TOKENS = 900;
 
 function normalizeFunctionArgs(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -65,13 +56,9 @@ function normalizeFunctionArgs(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function toDocument(value: unknown): DocumentType {
-  return value as DocumentType;
-}
-
-function normalizeJsonSchemaForBedrock(value: unknown): unknown {
+function normalizeJsonSchema(value: unknown): unknown {
   if (Array.isArray(value)) {
-    return value.map(normalizeJsonSchemaForBedrock);
+    return value.map(normalizeJsonSchema);
   }
 
   if (!value || typeof value !== 'object') {
@@ -95,7 +82,7 @@ function normalizeJsonSchemaForBedrock(value: unknown): unknown {
         }
       }
 
-      return [key, normalizeJsonSchemaForBedrock(entry)];
+      return [key, normalizeJsonSchema(entry)];
     })
   );
 }
@@ -103,8 +90,9 @@ function normalizeJsonSchemaForBedrock(value: unknown): unknown {
 async function callGemini(
   contents: AskAiContent[],
   model: AskAiModel,
-  tools: AskAiFunctionDeclaration[] = []
+  options: AskAiCallOptions
 ): Promise<AskAiModelResponse> {
+  const tools = options.tools ?? [];
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -120,9 +108,10 @@ async function callGemini(
       },
       body: JSON.stringify({
         generationConfig: {
-          temperature: 0.2,
+          temperature: options.temperature ?? DEFAULT_TEMPERATURE,
           topP: 0.9,
-          maxOutputTokens: 900,
+          maxOutputTokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+          ...(options.json ? { responseMimeType: 'application/json' } : {}),
         },
         contents,
         ...(tools.length > 0 ? { tools: [{ functionDeclarations: tools }] } : {}),
@@ -165,117 +154,163 @@ async function callGemini(
   return { text: answer || '', functionCall, content };
 }
 
-function convertToBedrockMessage(content: AskAiContent): BedrockMessage {
-  return {
-    role: content.role === 'model' ? 'assistant' : 'user',
-    content: content.parts.map((part): ContentBlock => {
-      if (part.functionCall) {
-        return {
-          toolUse: {
-            toolUseId: part.functionCall.id || part.functionCall.name,
-            name: part.functionCall.name,
-            input: toDocument(normalizeFunctionArgs(part.functionCall.args)),
-          },
-        };
-      }
+interface OpenAiToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
 
+type OpenAiMessage =
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string | null; tool_calls?: OpenAiToolCall[] }
+  | { role: 'tool'; tool_call_id: string; content: string };
+
+/** Converts the provider-neutral (Gemini-shaped) history into OpenAI-compatible chat messages. */
+export function convertToOpenAiMessages(contents: AskAiContent[]): OpenAiMessage[] {
+  const messages: OpenAiMessage[] = [];
+
+  for (const content of contents) {
+    const text = content.parts.map((part) => part.text || '').join('');
+
+    if (content.role === 'model') {
+      const toolCalls = content.parts
+        .filter((part) => part.functionCall)
+        .map((part): OpenAiToolCall => ({
+          id: part.functionCall!.id || part.functionCall!.name,
+          type: 'function',
+          function: {
+            name: part.functionCall!.name,
+            arguments: JSON.stringify(normalizeFunctionArgs(part.functionCall!.args)),
+          },
+        }));
+      messages.push({
+        role: 'assistant',
+        content: text || null,
+        ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      });
+      continue;
+    }
+
+    for (const part of content.parts) {
       if (part.functionResponse) {
-        return {
-          toolResult: {
-            toolUseId: part.functionResponse.id || part.functionResponse.name,
-            content: [{ text: part.functionResponse.response.result }],
-          },
-        };
+        messages.push({
+          role: 'tool',
+          tool_call_id: part.functionResponse.id || part.functionResponse.name,
+          content: part.functionResponse.response.result,
+        });
       }
+    }
+    if (text) {
+      messages.push({ role: 'user', content: text });
+    }
+  }
 
-      return { text: part.text || '' };
-    }),
-  };
+  return messages;
 }
 
-function convertToBedrockTools(tools: AskAiFunctionDeclaration[]): Tool[] {
-  return tools.map((tool) => ({
-    toolSpec: {
-      name: tool.name,
-      description: tool.description,
-      inputSchema: {
-        json: toDocument(normalizeJsonSchemaForBedrock(tool.parameters)),
-      },
-    },
-  }));
+function parseToolArguments(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== 'string') return normalizeFunctionArgs(raw);
+  try {
+    return normalizeFunctionArgs(JSON.parse(raw));
+  } catch {
+    return {};
+  }
 }
 
-async function callBedrock(
+/**
+ * GLM (open-weight) through an OpenAI-compatible chat-completions endpoint.
+ * Configure GLM_API_KEY, GLM_MODEL_ID, and optionally GLM_BASE_URL.
+ */
+async function callGlm(
   contents: AskAiContent[],
-  model: AskAiModel,
-  tools: AskAiFunctionDeclaration[] = []
+  options: AskAiCallOptions
 ): Promise<AskAiModelResponse> {
-  const region = process.env.BEDROCK_AWS_REGION || process.env.AWS_REGION || 'us-east-1';
-  const client = new BedrockRuntimeClient({ region });
-  const response = await client.send(
-    new ConverseCommand({
-      modelId: getBedrockModelId(model),
-      messages: contents.map(convertToBedrockMessage),
-      inferenceConfig: {
-        temperature: 0.2,
-        topP: 0.9,
-        maxTokens: 900,
-      },
-      ...(tools.length > 0 ? { toolConfig: { tools: convertToBedrockTools(tools) } } : {}),
-    })
-  );
+  const apiKey = process.env.GLM_API_KEY;
+  const modelId = process.env.GLM_MODEL_ID;
+  const baseUrl = (process.env.GLM_BASE_URL || 'https://api.z.ai/api/paas/v4').replace(/\/+$/, '');
 
-  const message = response.output?.message;
-  const parts = message?.content || [];
-  const answer = parts
-    .map((part) => ('text' in part ? part.text || '' : ''))
-    .join('')
-    .trim();
-  const toolUse = parts.find((part) => 'toolUse' in part && part.toolUse)?.toolUse;
-  const functionCall = toolUse?.name
-    ? {
-        id: toolUse.toolUseId,
-        name: toolUse.name,
-        args: normalizeFunctionArgs(toolUse.input),
-      }
-    : undefined;
-  const content = message
-    ? ({
-        role: 'model',
-        parts: parts.map((part): AskAiContentPart => {
-          if ('toolUse' in part && part.toolUse?.name) {
-            return {
-              functionCall: {
-                id: part.toolUse.toolUseId,
-                name: part.toolUse.name,
-                args: normalizeFunctionArgs(part.toolUse.input),
+  if (!apiKey || !modelId) {
+    throw new Error('Missing GLM_API_KEY or GLM_MODEL_ID on the server');
+  }
+
+  const tools = options.tools ?? [];
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: modelId,
+      messages: convertToOpenAiMessages(contents),
+      temperature: options.temperature ?? DEFAULT_TEMPERATURE,
+      top_p: 0.9,
+      max_tokens: options.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+      ...(options.json ? { response_format: { type: 'json_object' } } : {}),
+      ...(tools.length > 0
+        ? {
+            tools: tools.map((tool) => ({
+              type: 'function',
+              function: {
+                name: tool.name,
+                description: tool.description,
+                parameters: normalizeJsonSchema(tool.parameters),
               },
-            };
+            })),
           }
+        : {}),
+    }),
+    cache: 'no-store',
+  });
 
-          return { text: 'text' in part ? part.text || '' : '' };
-        }),
-      } satisfies AskAiContent)
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        choices?: Array<{
+          message?: {
+            content?: string | null;
+            tool_calls?: Array<{ id?: string; function?: { name?: string; arguments?: unknown } }>;
+          };
+        }>;
+        error?: { message?: string };
+      }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(payload?.error?.message || `GLM request failed (${response.status})`);
+  }
+
+  const message = payload?.choices?.[0]?.message;
+  const answer = (message?.content || '').trim();
+  const toolCall = message?.tool_calls?.find((call) => call.function?.name);
+  const functionCall = toolCall?.function?.name
+    ? {
+        id: toolCall.id,
+        name: toolCall.function.name,
+        args: parseToolArguments(toolCall.function.arguments),
+      }
     : undefined;
 
   if (!answer && !functionCall) {
-    throw new Error('Bedrock returned an empty response');
+    throw new Error('GLM returned an empty response');
   }
 
-  return { text: answer, functionCall, content };
+  const parts: AskAiContentPart[] = [];
+  if (answer) parts.push({ text: answer });
+  if (functionCall) parts.push({ functionCall });
+
+  return { text: answer, functionCall, content: { role: 'model', parts } };
 }
 
 export async function callAskAiModel(
   contents: AskAiContent[],
   model: AskAiModel,
-  options: { tools?: AskAiFunctionDeclaration[] } = {}
+  options: AskAiCallOptions = {}
 ) {
   const provider = getAskAiModelConfig(model).provider;
-  const tools = options.tools || [];
 
-  if (provider === 'bedrock') {
-    return callBedrock(contents, model, tools);
+  if (provider === 'glm') {
+    return callGlm(contents, options);
   }
 
-  return callGemini(contents, model, tools);
+  return callGemini(contents, model, options);
 }
