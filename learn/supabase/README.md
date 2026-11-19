@@ -12,6 +12,7 @@ Run these SQL scripts in order in your **Supabase Dashboard → SQL Editor**:
 | 3 | `03_ADD_USER_CLASS_MEMBERSHIPS.sql` | Apply on existing databases to add class memberships |
 | 4 | `04_REPLACE_USER_CLASS_ROLES.sql` | Apply on existing databases to replace boolean edit access with `owner` / `manager` / `student` roles |
 | 5 | `05_NOTES_PER_USER_MARKDOWN.sql` | Apply on existing databases to convert shared class notes into per-user markdown notes |
+| 6 | `06_LEARNER_STATE.sql` | Adds the structured learner model: versioned per-class concept graphs, per-student learner state, and an append-only tutor event log |
 
 ---
 
