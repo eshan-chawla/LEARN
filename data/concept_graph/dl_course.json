@@ -1,0 +1,546 @@
+{
+  "version": 1,
+  "course": "sjsu-deep-learning",
+  "defaults": {
+    "bkt": {
+      "pInit": 0.3,
+      "pTransit": 0.1,
+      "pSlip": 0.1,
+      "pGuess": 0.2
+    }
+  },
+  "concepts": [
+    {
+      "id": "matrix_multiplication",
+      "name": "Matrix multiplication"
+    },
+    {
+      "id": "dot_product",
+      "name": "Dot product"
+    },
+    {
+      "id": "derivatives",
+      "name": "Derivatives"
+    },
+    {
+      "id": "partial_derivatives",
+      "name": "Partial derivatives and gradients"
+    },
+    {
+      "id": "chain_rule",
+      "name": "Chain rule"
+    },
+    {
+      "id": "probability_basics",
+      "name": "Probability basics"
+    },
+    {
+      "id": "loss_functions",
+      "name": "Loss functions"
+    },
+    {
+      "id": "softmax_cross_entropy",
+      "name": "Softmax and cross-entropy"
+    },
+    {
+      "id": "gradient_descent",
+      "name": "Gradient descent"
+    },
+    {
+      "id": "sgd_minibatch",
+      "name": "Stochastic and mini-batch gradient descent"
+    },
+    {
+      "id": "momentum_adam",
+      "name": "Momentum and Adam"
+    },
+    {
+      "id": "perceptron",
+      "name": "Perceptron"
+    },
+    {
+      "id": "activation_functions",
+      "name": "Activation functions"
+    },
+    {
+      "id": "mlp",
+      "name": "Multilayer perceptron"
+    },
+    {
+      "id": "overfitting_regularization",
+      "name": "Overfitting and regularization"
+    },
+    {
+      "id": "computational_graph",
+      "name": "Computational graph",
+      "description": "Representing a computation as a DAG of primitive operations so derivatives can be composed locally.",
+      "keywords": [
+        "computational graph",
+        "forward pass",
+        "local gradient",
+        "node",
+        "upstream gradient"
+      ]
+    },
+    {
+      "id": "backprop",
+      "name": "Backpropagation",
+      "description": "Computing gradients of the loss with respect to every parameter by applying the chain rule backward through the computational graph.",
+      "keywords": [
+        "backpropagation",
+        "backward pass",
+        "upstream gradient",
+        "downstream gradient",
+        "gradient of the loss"
+      ],
+      "misconceptions": [
+        {
+          "id": "backprop.M1",
+          "description": "gradients flow forward from the input to the loss",
+          "probe": "In which direction are gradients propagated during training, and why does that order make the computation efficient?"
+        },
+        {
+          "id": "backprop.M2",
+          "description": "backpropagation is itself the optimizer that updates the weights",
+          "probe": "What does backpropagation compute, and which algorithm uses that result to change the weights?"
+        }
+      ]
+    },
+    {
+      "id": "vanishing_gradients",
+      "name": "Vanishing and exploding gradients",
+      "description": "Gradients shrinking or growing exponentially with depth because backprop multiplies many local derivatives.",
+      "keywords": [
+        "vanishing gradient",
+        "exploding gradient",
+        "sigmoid saturation",
+        "deep network",
+        "gradient clipping"
+      ],
+      "misconceptions": [
+        {
+          "id": "vanishing_gradients.M1",
+          "description": "vanishing gradients are caused by a learning rate that is too small",
+          "probe": "If you increase the learning rate tenfold in a deep sigmoid network, do the early layers stop having vanishing gradients? Explain."
+        }
+      ]
+    },
+    {
+      "id": "weight_initialization",
+      "name": "Weight initialization",
+      "description": "Choosing initial weight scales (Xavier/Glorot, He) so activations and gradients keep a stable variance across layers.",
+      "keywords": [
+        "xavier initialization",
+        "glorot",
+        "he initialization",
+        "variance",
+        "symmetry breaking"
+      ],
+      "misconceptions": [
+        {
+          "id": "weight_initialization.M1",
+          "description": "initializing all weights to zero is fine because training will move them apart",
+          "probe": "What happens to the hidden units of an MLP if every weight starts at exactly zero?"
+        }
+      ]
+    },
+    {
+      "id": "relu",
+      "name": "ReLU and its variants",
+      "description": "Rectified linear units and variants (leaky ReLU, GELU) whose non-saturating positive region keeps gradients from vanishing.",
+      "keywords": [
+        "relu",
+        "rectified linear unit",
+        "leaky relu",
+        "dead relu",
+        "gelu"
+      ]
+    },
+    {
+      "id": "batch_norm",
+      "name": "Batch and layer normalization",
+      "description": "Normalizing activations with learned scale and shift to stabilize and speed up training; batch statistics in training versus running statistics at inference.",
+      "keywords": [
+        "batch normalization",
+        "layer normalization",
+        "running mean",
+        "internal covariate shift",
+        "gamma beta"
+      ],
+      "misconceptions": [
+        {
+          "id": "batch_norm.M1",
+          "description": "batch normalization uses the current batch statistics at inference time too",
+          "probe": "At test time a single example arrives. Which mean and variance does a batch-norm layer use, and why?"
+        }
+      ]
+    },
+    {
+      "id": "dropout",
+      "name": "Dropout",
+      "description": "Randomly zeroing activations during training as a regularizer, with rescaling so expected activations match at inference.",
+      "keywords": [
+        "dropout",
+        "keep probability",
+        "inverted dropout",
+        "regularization",
+        "ensemble"
+      ],
+      "misconceptions": [
+        {
+          "id": "dropout.M1",
+          "description": "dropout is still applied when making predictions at inference",
+          "probe": "Should a trained network randomly drop units when it predicts on the test set? What does inverted dropout do about the scale?"
+        }
+      ]
+    },
+    {
+      "id": "residual_connections",
+      "name": "Residual connections",
+      "description": "Skip connections that add a block's input to its output, giving gradients an identity path and enabling very deep networks.",
+      "keywords": [
+        "residual connection",
+        "skip connection",
+        "resnet",
+        "identity mapping",
+        "residual block"
+      ],
+      "misconceptions": [
+        {
+          "id": "residual_connections.M1",
+          "description": "residual connections help only because they add extra parameters",
+          "probe": "A residual block adds x to F(x) with no extra weights. Why does that help gradients reach early layers?"
+        }
+      ]
+    },
+    {
+      "id": "convolution",
+      "name": "Convolutional layers",
+      "description": "Sliding learned filters over spatial inputs with weight sharing and local connectivity; kernel size, stride, padding, channels.",
+      "keywords": [
+        "convolution",
+        "kernel",
+        "filter",
+        "stride",
+        "padding",
+        "feature map"
+      ],
+      "misconceptions": [
+        {
+          "id": "convolution.M1",
+          "description": "each output position of a convolution has its own separate weights",
+          "probe": "How many distinct weights does a 3x3 conv layer with 16 input and 32 output channels have, and how does that depend on image size?"
+        }
+      ]
+    },
+    {
+      "id": "pooling_cnn",
+      "name": "Pooling and CNN architectures",
+      "description": "Downsampling with max/average pooling and stacking conv blocks into CNN architectures with growing receptive fields.",
+      "keywords": [
+        "max pooling",
+        "average pooling",
+        "receptive field",
+        "downsampling",
+        "cnn architecture"
+      ]
+    },
+    {
+      "id": "rnn",
+      "name": "Recurrent neural networks",
+      "description": "Networks that process sequences with a hidden state updated by shared weights at each time step, trained with backpropagation through time.",
+      "keywords": [
+        "recurrent neural network",
+        "hidden state",
+        "time step",
+        "backpropagation through time",
+        "sequence"
+      ]
+    },
+    {
+      "id": "lstm",
+      "name": "LSTM and gated recurrent units",
+      "description": "Gated recurrent cells (input, forget, output gates; GRU) whose additive cell-state path mitigates vanishing gradients over time.",
+      "keywords": [
+        "lstm",
+        "long short-term memory",
+        "forget gate",
+        "cell state",
+        "gru"
+      ],
+      "misconceptions": [
+        {
+          "id": "lstm.M1",
+          "description": "the forget gate erases memory, so a forget gate value near 1 means forgetting everything",
+          "probe": "If an LSTM forget gate outputs 0.99, does the cell keep or discard its previous state?"
+        }
+      ]
+    },
+    {
+      "id": "attention",
+      "name": "Attention mechanism",
+      "description": "Weighting values by the softmax of query-key similarity so a model can focus on relevant inputs; additive and dot-product attention.",
+      "keywords": [
+        "attention",
+        "query",
+        "key",
+        "value",
+        "attention weights",
+        "alignment"
+      ],
+      "misconceptions": [
+        {
+          "id": "attention.M1",
+          "description": "attention weights are learned parameters fixed after training",
+          "probe": "Are attention weights the same for every input sentence after training? What actually is learned?"
+        }
+      ]
+    },
+    {
+      "id": "self_attention",
+      "name": "Self-attention and multi-head attention",
+      "description": "Attention where queries, keys and values come from the same sequence; scaled dot-product and multiple heads in parallel.",
+      "keywords": [
+        "self-attention",
+        "scaled dot-product",
+        "multi-head attention",
+        "sqrt(d_k)",
+        "attention matrix"
+      ]
+    },
+    {
+      "id": "positional_encoding",
+      "name": "Positional encoding",
+      "description": "Injecting token order into permutation-invariant self-attention via sinusoidal or learned position embeddings.",
+      "keywords": [
+        "positional encoding",
+        "position embedding",
+        "sinusoidal",
+        "token order",
+        "permutation invariant"
+      ],
+      "misconceptions": [
+        {
+          "id": "positional_encoding.M1",
+          "description": "self-attention already knows token order without positional encodings",
+          "probe": "If you shuffle the input tokens of a transformer layer with no positional encoding, how do its outputs change?"
+        }
+      ]
+    },
+    {
+      "id": "transformer",
+      "name": "Transformer architecture",
+      "description": "Encoder/decoder stacks of multi-head self-attention and feed-forward blocks with residual connections and layer normalization.",
+      "keywords": [
+        "transformer",
+        "encoder",
+        "decoder",
+        "feed-forward",
+        "masked attention",
+        "layer norm"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "dot_product",
+      "to": "matrix_multiplication"
+    },
+    {
+      "from": "derivatives",
+      "to": "partial_derivatives"
+    },
+    {
+      "from": "derivatives",
+      "to": "chain_rule"
+    },
+    {
+      "from": "partial_derivatives",
+      "to": "gradient_descent"
+    },
+    {
+      "from": "loss_functions",
+      "to": "gradient_descent"
+    },
+    {
+      "from": "gradient_descent",
+      "to": "sgd_minibatch"
+    },
+    {
+      "from": "sgd_minibatch",
+      "to": "momentum_adam"
+    },
+    {
+      "from": "probability_basics",
+      "to": "loss_functions"
+    },
+    {
+      "from": "probability_basics",
+      "to": "softmax_cross_entropy"
+    },
+    {
+      "from": "loss_functions",
+      "to": "softmax_cross_entropy"
+    },
+    {
+      "from": "dot_product",
+      "to": "perceptron"
+    },
+    {
+      "from": "perceptron",
+      "to": "mlp"
+    },
+    {
+      "from": "activation_functions",
+      "to": "mlp"
+    },
+    {
+      "from": "matrix_multiplication",
+      "to": "mlp"
+    },
+    {
+      "from": "mlp",
+      "to": "overfitting_regularization"
+    },
+    {
+      "from": "chain_rule",
+      "to": "computational_graph"
+    },
+    {
+      "from": "partial_derivatives",
+      "to": "computational_graph"
+    },
+    {
+      "from": "computational_graph",
+      "to": "backprop"
+    },
+    {
+      "from": "gradient_descent",
+      "to": "backprop"
+    },
+    {
+      "from": "matrix_multiplication",
+      "to": "backprop"
+    },
+    {
+      "from": "mlp",
+      "to": "backprop"
+    },
+    {
+      "from": "backprop",
+      "to": "vanishing_gradients"
+    },
+    {
+      "from": "activation_functions",
+      "to": "vanishing_gradients"
+    },
+    {
+      "from": "vanishing_gradients",
+      "to": "weight_initialization"
+    },
+    {
+      "from": "mlp",
+      "to": "weight_initialization"
+    },
+    {
+      "from": "activation_functions",
+      "to": "relu"
+    },
+    {
+      "from": "vanishing_gradients",
+      "to": "relu"
+    },
+    {
+      "from": "sgd_minibatch",
+      "to": "batch_norm"
+    },
+    {
+      "from": "vanishing_gradients",
+      "to": "batch_norm"
+    },
+    {
+      "from": "overfitting_regularization",
+      "to": "dropout"
+    },
+    {
+      "from": "mlp",
+      "to": "dropout"
+    },
+    {
+      "from": "vanishing_gradients",
+      "to": "residual_connections"
+    },
+    {
+      "from": "backprop",
+      "to": "residual_connections"
+    },
+    {
+      "from": "mlp",
+      "to": "convolution"
+    },
+    {
+      "from": "matrix_multiplication",
+      "to": "convolution"
+    },
+    {
+      "from": "convolution",
+      "to": "pooling_cnn"
+    },
+    {
+      "from": "mlp",
+      "to": "rnn"
+    },
+    {
+      "from": "backprop",
+      "to": "rnn"
+    },
+    {
+      "from": "rnn",
+      "to": "lstm"
+    },
+    {
+      "from": "vanishing_gradients",
+      "to": "lstm"
+    },
+    {
+      "from": "dot_product",
+      "to": "attention"
+    },
+    {
+      "from": "softmax_cross_entropy",
+      "to": "attention"
+    },
+    {
+      "from": "rnn",
+      "to": "attention"
+    },
+    {
+      "from": "attention",
+      "to": "self_attention"
+    },
+    {
+      "from": "matrix_multiplication",
+      "to": "self_attention"
+    },
+    {
+      "from": "self_attention",
+      "to": "positional_encoding"
+    },
+    {
+      "from": "self_attention",
+      "to": "transformer"
+    },
+    {
+      "from": "positional_encoding",
+      "to": "transformer"
+    },
+    {
+      "from": "residual_connections",
+      "to": "transformer"
+    },
+    {
+      "from": "batch_norm",
+      "to": "transformer"
+    }
+  ]
+}

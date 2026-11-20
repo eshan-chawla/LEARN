@@ -1,0 +1,127 @@
+{
+  "_comment": "Owner: Joao. STUB committed by Eshan with the frozen concept ids. Joao fills in description, keywords (3-6 lecture terms), misconceptions (<concept>.M<n> with a discriminating probe), and may revise the edges among these concepts. Do not rename ids. Run `cd learn && npm run graph:build` after editing.",
+  "concepts": [
+    {
+      "id": "matrix_multiplication",
+      "name": "Matrix multiplication"
+    },
+    {
+      "id": "dot_product",
+      "name": "Dot product"
+    },
+    {
+      "id": "derivatives",
+      "name": "Derivatives"
+    },
+    {
+      "id": "partial_derivatives",
+      "name": "Partial derivatives and gradients"
+    },
+    {
+      "id": "chain_rule",
+      "name": "Chain rule"
+    },
+    {
+      "id": "probability_basics",
+      "name": "Probability basics"
+    },
+    {
+      "id": "loss_functions",
+      "name": "Loss functions"
+    },
+    {
+      "id": "softmax_cross_entropy",
+      "name": "Softmax and cross-entropy"
+    },
+    {
+      "id": "gradient_descent",
+      "name": "Gradient descent"
+    },
+    {
+      "id": "sgd_minibatch",
+      "name": "Stochastic and mini-batch gradient descent"
+    },
+    {
+      "id": "momentum_adam",
+      "name": "Momentum and Adam"
+    },
+    {
+      "id": "perceptron",
+      "name": "Perceptron"
+    },
+    {
+      "id": "activation_functions",
+      "name": "Activation functions"
+    },
+    {
+      "id": "mlp",
+      "name": "Multilayer perceptron"
+    },
+    {
+      "id": "overfitting_regularization",
+      "name": "Overfitting and regularization"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dot_product",
+      "to": "matrix_multiplication"
+    },
+    {
+      "from": "derivatives",
+      "to": "partial_derivatives"
+    },
+    {
+      "from": "derivatives",
+      "to": "chain_rule"
+    },
+    {
+      "from": "partial_derivatives",
+      "to": "gradient_descent"
+    },
+    {
+      "from": "loss_functions",
+      "to": "gradient_descent"
+    },
+    {
+      "from": "gradient_descent",
+      "to": "sgd_minibatch"
+    },
+    {
+      "from": "sgd_minibatch",
+      "to": "momentum_adam"
+    },
+    {
+      "from": "probability_basics",
+      "to": "loss_functions"
+    },
+    {
+      "from": "probability_basics",
+      "to": "softmax_cross_entropy"
+    },
+    {
+      "from": "loss_functions",
+      "to": "softmax_cross_entropy"
+    },
+    {
+      "from": "dot_product",
+      "to": "perceptron"
+    },
+    {
+      "from": "perceptron",
+      "to": "mlp"
+    },
+    {
+      "from": "activation_functions",
+      "to": "mlp"
+    },
+    {
+      "from": "matrix_multiplication",
+      "to": "mlp"
+    },
+    {
+      "from": "mlp",
+      "to": "overfitting_regularization"
+    }
+  ]
+}
