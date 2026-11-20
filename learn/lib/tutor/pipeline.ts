@@ -7,6 +7,7 @@ import { applyTurn, createInitialState } from '@/lib/tutor/learner-state';
 import {
   buildSummaryPrompt,
   clampToBudget,
+  composeMemoryBlock,
   DEFAULT_MEMORY_CHAR_BUDGET,
   lastTutorMessage,
   rawHistoryBlock,
@@ -74,6 +75,8 @@ export interface TutorTurnResult {
   critic: CriticVerdict | null;
   steps: TutorStep[];
   latencyMs: Record<string, number>;
+  /** Length of the memory block actually given to the generator (the realized memory budget). */
+  memoryChars: number;
   warnings: string[];
 }
 
@@ -193,21 +196,28 @@ export async function runTutorTurn(
   let memoryBlock = '';
   if (config.memory === 'raw') memoryBlock = rawHistoryBlock(session.history, budget);
   if (config.memory === 'summary') {
-    memoryBlock = clampToBudget(
-      `Summary of the conversation so far: ${session.summary ?? '(none yet)'}\nTutor's previous message: ${previousTutorMessage ?? '(none)'}`,
+    memoryBlock = composeMemoryBlock(
+      `Summary of the conversation so far: ${session.summary ?? '(none yet)'}`,
+      previousTutorMessage,
       budget
     );
   }
   if (structured) {
-    memoryBlock = clampToBudget(
-      `Learner model:\n${summarizeStateForPrompt(state, graph, diagnosis?.targetConceptId ?? null, config.thresholds)}\nTutor's previous message: ${previousTutorMessage ?? '(none)'}`,
+    memoryBlock = composeMemoryBlock(
+      `Learner model:\n${summarizeStateForPrompt(state, graph, diagnosis?.targetConceptId ?? null, config.thresholds)}`,
+      previousTutorMessage,
       budget
     );
   }
 
   const prompt = buildTutorPrompt({ studentMessage, excerpts, memoryBlock, decision, graph, ragEnabled: config.rag !== 'none' });
   const generated = parseTutorReply(await timed('generate', () => deps.complete(prompt, { json: true })), graph);
-  warnings.push(...generated.warnings);
+  // In structured mode the policy's action is used and the generator's action is ignored, so
+  // problems with that field are not failures; reply-parsing problems still are.
+  const generatorWarnings = decision
+    ? generated.warnings.filter((w) => !w.startsWith('Generator action') && !w.startsWith('Generator returned unknown action') && !w.startsWith('Generator output has no action'))
+    : generated.warnings;
+  warnings.push(...generatorWarnings);
   let reply = generated.reply;
   const action = decision ? decision.primary : generated.action;
   steps.push({
@@ -215,7 +225,7 @@ export async function runTutorTurn(
     kind: 'generate',
     title: 'Generated the reply',
     detail: decision ? `Realized policy move ${decision.primary.type}` : `Model chose ${generated.action?.type ?? 'no valid move'}`,
-    ok: generated.warnings.length === 0,
+    ok: generatorWarnings.length === 0,
   });
 
   // 6. Grounding critic.
@@ -245,7 +255,8 @@ export async function runTutorTurn(
   if (config.memory === 'summary') {
     try {
       const updated = await timed('summary', () =>
-        deps.complete(buildSummaryPrompt(session.summary, studentMessage, reply, budget), { json: false })
+        // Half the budget is reserved for the previous tutor message (composeMemoryBlock).
+        deps.complete(buildSummaryPrompt(session.summary, studentMessage, reply, Math.floor(budget / 2)), { json: false })
       );
       summary = clampToBudget(updated.trim(), budget);
       steps.push({ id: 'memory', kind: 'memory', title: 'Updated conversation summary', detail: `${summary.length} chars`, ok: true });
@@ -271,6 +282,7 @@ export async function runTutorTurn(
     critic,
     steps,
     latencyMs,
+    memoryChars: memoryBlock.length,
     warnings,
   };
 }

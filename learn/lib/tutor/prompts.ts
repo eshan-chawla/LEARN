@@ -94,7 +94,11 @@ export function buildTutorPrompt(args: TutorPromptArgs): string {
     lines.push(excerpts.length > 0 ? excerpts.map((e) => `[${e.index}] ${e.text}`).join('\n\n') : '(no excerpts were retrieved)');
     lines.push('');
   } else {
-    lines.push('No course excerpts are available; rely on standard deep learning knowledge.', '');
+    lines.push(
+      'No course excerpts are available; rely on standard deep learning knowledge.',
+      'If the question is not about deep learning or this course, decline: start the reply with "That is outside this course" and do not answer it.',
+      ''
+    );
   }
 
   if (memoryBlock) lines.push('What you know about this student and conversation:', memoryBlock, '');
@@ -184,6 +188,18 @@ function toAction(raw: Record<string, unknown>, graph: ConceptGraph, warnings: s
   }
 }
 
+/** Recovers the "reply" string from JSON cut off by the output-token limit. */
+function salvageReply(text: string): string | null {
+  const match = text.match(/"reply"\s*:\s*"((?:[^"\\]|\\.)*)/);
+  if (!match || !match[1].trim()) return null;
+  const body = match[1].replace(/\\$/, '');
+  try {
+    return (JSON.parse(`"${body}"`) as string).trim();
+  } catch {
+    return body.trim();
+  }
+}
+
 /** Tolerant parse of the generator's JSON; prose output becomes the reply with no action. */
 export function parseTutorReply(
   text: string,
@@ -193,8 +209,13 @@ export function parseTutorReply(
   const json = extractJson(text);
   const reply = json ? str(json.reply) : null;
   if (!json || !reply) {
-    warnings.push('Generator output was not the expected JSON; using raw text as the reply.');
-    return { action: null, reply: text.trim(), warnings };
+    const salvaged = salvageReply(text);
+    warnings.push(
+      salvaged !== null
+        ? 'Generator JSON was truncated or malformed; recovered the reply field.'
+        : 'Generator output was not the expected JSON; using raw text as the reply.'
+    );
+    return { action: null, reply: salvaged ?? text.trim(), warnings };
   }
   const rawAction = json.action && typeof json.action === 'object' ? (json.action as Record<string, unknown>) : null;
   if (!rawAction) warnings.push('Generator output has no action object.');

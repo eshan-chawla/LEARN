@@ -25,11 +25,25 @@ export function rawHistoryBlock(history: ChatTurn[], budget: number): string {
   for (let i = history.length - 1; i >= 0; i -= 1) {
     const line = formatTurn(history[i]);
     const cost = line.length + (kept.length > 0 ? 1 : 0);
+    // The newest turn is always kept (tail-truncated if it alone exceeds the budget), so a long
+    // tutor reply never leaves M1 with an empty memory.
+    if (kept.length === 0 && cost > budget) return clampToBudget(line, budget);
     if (used + cost > budget) break;
     kept.unshift(line);
     used += cost;
   }
   return kept.join('\n');
+}
+
+/**
+ * Memory block for M1b and M2: the previous tutor message gets a reserved share of the budget
+ * (it is what a short follow-up answer refers to), the summary/state block gets the rest.
+ * Reserving it first keeps the comparison fair when the summary or state block is long.
+ */
+export function composeMemoryBlock(main: string, previousTutorMessage: string | null, budget: number): string {
+  const tutorLine = clampToBudget(`Tutor's previous message: ${previousTutorMessage ?? '(none)'}`, Math.floor(budget / 2));
+  const remaining = budget - tutorLine.length - 1;
+  return remaining > 0 ? `${clampToBudget(main, remaining)}\n${tutorLine}` : tutorLine;
 }
 
 /** M1b: prompt that folds the latest exchange into a rolling summary of the student. */

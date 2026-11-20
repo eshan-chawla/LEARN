@@ -278,3 +278,28 @@ describe('runTutorTurn — retrieval and critic flags', () => {
     expect(result.reply).toBe('Tutor reply [1].');
   });
 });
+
+describe('review fixes: pipeline', () => {
+  it('structured mode ignores the generator action, so bad ids do not mark the step as failed', async () => {
+    const { deps } = fakeDeps({
+      diagnosis: { target_concept_id: 'backprop', turn_kind: 'question', struggling: false, observations: [] },
+      generator: { action: { type: 'hint', concept_id: 'not_a_concept' }, reply: 'Here is how it works [1].' },
+    });
+    const result = await runTutorTurn({ classId: 'class-1', graph, session: sessionWith(), studentMessage: 'q' }, STRUCTURED, deps);
+    expect(result.steps.find((s) => s.kind === 'generate')?.ok).toBe(true);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('keeps the previous tutor message in summary mode even when the summary fills the budget', async () => {
+    const session = sessionWith({ summary: 'S'.repeat(5000), history: [{ role: 'tutor', content: 'PROBE: what is dL/dw?' }] });
+    const { deps, prompts } = fakeDeps({ summary: 'new' });
+    const result = await runTutorTurn(
+      { classId: 'class-1', graph, session, studentMessage: 'yes' },
+      { rag: 'none', critic: false, memory: 'summary', memoryCharBudget: 300 },
+      deps
+    );
+    expect(prompts[0].prompt).toContain('PROBE: what is dL/dw?');
+    expect(result.memoryChars).toBeGreaterThan(0);
+    expect(result.memoryChars).toBeLessThanOrEqual(300);
+  });
+});

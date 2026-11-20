@@ -95,6 +95,7 @@ describe('callAskAiModel with GLM', () => {
     expect(body.tools[0].function.parameters.type).toBe('object');
     expect(body.tools[0].function.parameters.properties.query.type).toBe('string');
     expect(init.headers.Authorization).toBe('Bearer test-key');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
 
     expect(result.functionCall).toEqual({ id: 'abc', name: 'search_class_pdfs', args: { query: 'chain rule' } });
   });

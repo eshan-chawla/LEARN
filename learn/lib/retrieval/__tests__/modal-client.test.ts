@@ -13,7 +13,9 @@ afterEach(() => {
 
 describe('searchModalRetrieval', () => {
   it('sends mode only when provided', async () => {
-    const fetchMock = vi.fn().mockImplementation(async () => okResponse([]));
+    const fetchMock = vi.fn().mockImplementation(
+      async () => new Response(JSON.stringify({ success: true, hits: [], mode: 'hybrid' }), { status: 200 })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await searchModalRetrieval({ query: 'q', classId: 'c' }, ENV);
@@ -52,5 +54,34 @@ describe('mapModalHit', () => {
   it('maps conceptIds and ignores non-string entries', () => {
     expect(mapModalHit({ text: 't', conceptIds: ['backprop', 3] }).conceptIds).toEqual(['backprop']);
     expect(mapModalHit({ text: 't' }).conceptIds).toBeUndefined();
+  });
+});
+
+describe('review fixes: timeout and mode echo', () => {
+  it('aborts a hanging webhook and throws a timeout RetrievalError', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(init.signal?.reason)))
+      )
+    );
+    const error = await searchModalRetrieval({ query: 'q', classId: 'c' }, { ...ENV, timeoutMs: 20 }).catch((e) => e);
+    expect(error).toBeInstanceOf(RetrievalError);
+    expect(error.message).toMatch(/timed out/i);
+  });
+
+  it('rejects a hybrid request the webhook did not serve as hybrid', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => okResponse([])));
+    await expect(searchModalRetrieval({ query: 'q', classId: 'c', mode: 'hybrid' }, ENV)).rejects.toThrow(/hybrid/);
+    await expect(searchModalRetrieval({ query: 'q', classId: 'c', mode: 'dense' }, ENV)).resolves.toMatchObject({ hits: [] });
+  });
+
+  it('accepts a hybrid response that echoes the mode', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async () => new Response(JSON.stringify({ success: true, hits: [], mode: 'hybrid' }), { status: 200 }))
+    );
+    await expect(searchModalRetrieval({ query: 'q', classId: 'c', mode: 'hybrid' }, ENV)).resolves.toMatchObject({ hits: [] });
   });
 });

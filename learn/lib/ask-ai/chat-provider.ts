@@ -49,6 +49,12 @@ export interface AskAiCallOptions {
 
 const DEFAULT_TEMPERATURE = 0.2;
 const DEFAULT_MAX_OUTPUT_TOKENS = 900;
+/** Per-call timeout so one slow model call cannot use up the serverless function's whole budget. */
+const DEFAULT_MODEL_TIMEOUT_MS = 25_000;
+
+function modelTimeoutSignal() {
+  return AbortSignal.timeout(Number(process.env.ASK_AI_TIMEOUT_MS) || DEFAULT_MODEL_TIMEOUT_MS);
+}
 
 function normalizeFunctionArgs(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -117,6 +123,7 @@ async function callGemini(
         ...(tools.length > 0 ? { tools: [{ functionDeclarations: tools }] } : {}),
       }),
       cache: 'no-store',
+      signal: modelTimeoutSignal(),
     }
   );
 
@@ -236,6 +243,7 @@ async function callGlm(
   const tools = options.tools ?? [];
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST',
+    signal: modelTimeoutSignal(),
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${apiKey}`,

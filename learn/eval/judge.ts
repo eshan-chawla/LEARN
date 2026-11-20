@@ -1,6 +1,7 @@
 /** LLM-as-judge for answer correctness against a reference answer (temperature 0, JSON). */
 export interface JudgeVerdict {
-  correct: 0 | 0.5 | 1;
+  /** null when the judge output could not be parsed (counted as a judge error, not as wrong). */
+  correct: 0 | 0.5 | 1 | null;
   reason: string;
 }
 
@@ -31,6 +32,6 @@ export async function judgeCorrectness(
     const snapped = ([0, 0.5, 1] as const).reduce((best, v) => (Math.abs(v - score) < Math.abs(best - score) ? v : best));
     return { correct: snapped, reason: typeof parsed.reason === 'string' ? parsed.reason : '' };
   } catch {
-    return { correct: 0, reason: 'judge parse error' };
+    return { correct: null, reason: 'judge parse error' };
   }
 }

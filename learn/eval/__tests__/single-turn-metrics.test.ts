@@ -4,6 +4,8 @@ import {
   citationPrecision,
   citedIndices,
   isAbstention,
+  outOfRangeCitations,
+  retrievalFailure,
   recallAtK,
   summarize,
 } from '@/eval/single-turn-metrics';
@@ -30,9 +32,39 @@ describe('citations', () => {
   it('citationPrecision counts only cited excerpts matching gold file+page', () => {
     expect(citationPrecision([1, 3], HITS, GOLD)).toBe(0.5);
     expect(citationPrecision([1], HITS, GOLD)).toBe(1);
-    expect(citationPrecision([9], HITS, GOLD)).toBe(0); // marker pointing at no excerpt is wrong
+    expect(citationPrecision([9], HITS, GOLD)).toBeNull(); // out-of-range markers (e.g. shapes like [32]) are not citations
+    expect(citationPrecision([1, 32], HITS, GOLD)).toBe(1);
+    expect(citationPrecision([1], [], GOLD)).toBeNull(); // A0: nothing retrieved
     expect(citationPrecision([], HITS, GOLD)).toBeNull();
     expect(citationPrecision([1], HITS, null)).toBeNull();
+  });
+});
+
+describe('review fixes', () => {
+  it('counts out-of-range bracket markers separately', () => {
+    expect(outOfRangeCitations([1, 0, 32, 3], HITS)).toBe(2);
+  });
+
+  it('detects refusals with curly apostrophes and the no-RAG decline phrase', () => {
+    expect(isAbstention('I can\u2019t solve graded work for you.')).toBe(true);
+    expect(isAbstention("That is outside this course, so I can't help with it.")).toBe(true);
+  });
+
+  it('flags turns whose retrieval failed as infrastructure failures', () => {
+    expect(retrievalFailure([{ kind: 'retrieve', ok: false, detail: 'Modal timeout' }])).toBe('Modal timeout');
+    expect(retrievalFailure([{ kind: 'retrieve', ok: true, detail: '' }, { kind: 'generate', ok: false, detail: 'x' }])).toBeNull();
+  });
+
+  it('reports abstention per item type and counts judge errors instead of scoring them 0', () => {
+    const base = { citationPrecision: null, recallAt5: null, faithfulness: null, latencyTotalMs: 1 };
+    const summary = summarize([
+      { ...base, itemType: 'in_scope', judge: 1, judgeError: false, abstentionCorrect: true },
+      { ...base, itemType: 'in_scope', judge: null, judgeError: true, abstentionCorrect: true },
+      { ...base, itemType: 'out_of_scope', judge: null, judgeError: false, abstentionCorrect: false },
+    ]);
+    expect(summary.correctness).toBe(1);
+    expect(summary.judgeErrors).toBe(1);
+    expect(summary.abstentionByType).toEqual({ in_scope: 1, out_of_scope: 0, integrity: null });
   });
 });
 
@@ -68,8 +100,8 @@ describe('abstention', () => {
 describe('summarize', () => {
   it('averages non-null values and reports latency percentiles', () => {
     const summary = summarize([
-      { judge: 1, citationPrecision: 1, recallAt5: null, abstentionCorrect: true, faithfulness: null, latencyTotalMs: 100 },
-      { judge: 0, citationPrecision: null, recallAt5: 0.5, abstentionCorrect: false, faithfulness: null, latencyTotalMs: 300 },
+      { itemType: 'in_scope', judge: 1, judgeError: false, citationPrecision: 1, recallAt5: null, abstentionCorrect: true, faithfulness: null, latencyTotalMs: 100 },
+      { itemType: 'in_scope', judge: 0, judgeError: false, citationPrecision: null, recallAt5: 0.5, abstentionCorrect: false, faithfulness: null, latencyTotalMs: 300 },
     ]);
     expect(summary).toMatchObject({
       n: 2, correctness: 0.5, citationPrecision: 1, recallAt5: 0.5, abstentionAccuracy: 0.5, faithfulness: null,

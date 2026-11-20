@@ -40,9 +40,12 @@ export function mapModalHit(hit: Record<string, unknown>): RetrievalHit {
   return mapped;
 }
 
+/** Keeps a hung or cold-starting webhook from consuming the whole serverless time budget. */
+export const DEFAULT_RETRIEVAL_TIMEOUT_MS = 15_000;
+
 export async function searchModalRetrieval(
   input: RetrievalSearchRequest,
-  env: { url?: string; secret?: string } = {}
+  env: { url?: string; secret?: string; timeoutMs?: number } = {}
 ): Promise<RetrievalSearchResponse> {
   const url = env.url ?? process.env.MODAL_RETRIEVAL_WEBHOOK_URL;
   const secret = env.secret ?? process.env.MODAL_WEBHOOK_SECRET;
@@ -54,20 +57,31 @@ export async function searchModalRetrieval(
     );
   }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      webhook_secret: secret,
-      query: input.query,
-      class_id: input.classId,
-      content_types: input.contentTypes,
-      source_ids: input.sourceIds,
-      limit: input.limit,
-      ...(input.mode ? { mode: input.mode } : {}),
-    }),
-    cache: 'no-store',
-  });
+  const timeoutMs = env.timeoutMs ?? (Number(process.env.MODAL_RETRIEVAL_TIMEOUT_MS) || DEFAULT_RETRIEVAL_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        webhook_secret: secret,
+        query: input.query,
+        class_id: input.classId,
+        content_types: input.contentTypes,
+        source_ids: input.sourceIds,
+        limit: input.limit,
+        ...(input.mode ? { mode: input.mode } : {}),
+      }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    const name = error instanceof Error || error instanceof DOMException ? error.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      throw new RetrievalError(`Retrieval timed out after ${timeoutMs} ms`, 504);
+    }
+    throw new RetrievalError(`Retrieval request failed: ${error instanceof Error ? error.message : String(error)}`, 502);
+  }
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
@@ -79,6 +93,12 @@ export async function searchModalRetrieval(
       typeof payload?.error === 'string' ? payload.error : 'Retrieval service returned an invalid response',
       500
     );
+  }
+
+  // A webhook without hybrid support ignores `mode` and silently serves dense results, which would
+  // make A2 indistinguishable from A1. Hybrid-capable webhooks echo the mode they served.
+  if (input.mode === 'hybrid' && payload.mode !== 'hybrid') {
+    throw new RetrievalError('Hybrid retrieval was requested but the webhook did not serve it (deploy hybrid retrieval, J1).', 501);
   }
 
   return {

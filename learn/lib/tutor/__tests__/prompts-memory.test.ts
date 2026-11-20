@@ -93,3 +93,35 @@ describe('buildTutorPrompt', () => {
     expect(isAbstention(phrase!)).toBe(true);
   });
 });
+
+describe('review fixes: prompts and memory', () => {
+  it('salvages the reply from truncated generator JSON instead of showing raw JSON', () => {
+    const parsed = parseTutorReply('{"action":{"type":"answer"},"reply":"Backprop applies the chain rule \\"backward\\" through the gra', miniGraph());
+    expect(parsed.reply).toBe('Backprop applies the chain rule "backward" through the gra');
+    expect(parsed.action).toBeNull();
+    expect(parsed.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('gives the no-RAG prompt a decline instruction the abstention metric recognizes', async () => {
+    const { buildTutorPrompt } = await import('@/lib/tutor/prompts');
+    const { isAbstention } = await import('@/eval/single-turn-metrics');
+    const prompt = buildTutorPrompt({ studentMessage: 'q', excerpts: [], memoryBlock: '', decision: null, graph: miniGraph(), ragEnabled: false });
+    const phrase = prompt.match(/decline: start the reply with "([^"]+)"/)?.[1];
+    expect(phrase).toBeTruthy();
+    expect(isAbstention(phrase!)).toBe(true);
+  });
+
+  it('rawHistoryBlock keeps the newest turn even when it alone exceeds the budget', () => {
+    const block = rawHistoryBlock([{ role: 'tutor', content: 'y'.repeat(100) }], 30);
+    expect(block.startsWith('Tutor: yyy')).toBe(true);
+    expect(block.length).toBe(30);
+  });
+
+  it('composeMemoryBlock reserves room for the previous tutor message', async () => {
+    const { composeMemoryBlock } = await import('@/lib/tutor/memory');
+    const block = composeMemoryBlock('S'.repeat(500), 'What is the derivative of x^2?', 200);
+    expect(block.length).toBeLessThanOrEqual(200);
+    expect(block).toContain("Tutor's previous message: What is the derivative of x^2?");
+    expect(block).toContain('SSS');
+  });
+});

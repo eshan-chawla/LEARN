@@ -23,7 +23,7 @@ describe('judgeCorrectness', () => {
   });
 
   it('fails closed on unparseable output', async () => {
-    expect(await judgeCorrectness(input, async () => 'looks right to me')).toEqual({ correct: 0, reason: 'judge parse error' });
+    expect(await judgeCorrectness(input, async () => 'looks right to me')).toEqual({ correct: null, reason: 'judge parse error' });
   });
 
   it('puts gold answer and candidate in the prompt', async () => {

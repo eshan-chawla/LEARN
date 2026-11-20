@@ -10,7 +10,9 @@ export function makeComplete(model: AskAiModel) {
     const response = await callAskAiModel([{ role: 'user', parts: [{ text: prompt }] }], model, {
       json: options.json,
       temperature: 0,
-      maxOutputTokens: 1200,
+      // Generous: Gemini 2.5 Flash/Pro thinking tokens may count toward this limit, and a
+      // truncated JSON reply loses the closing brace.
+      maxOutputTokens: 4096,
     });
     return response.text;
   };

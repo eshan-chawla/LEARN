@@ -53,6 +53,7 @@ cd learn && cp .env.local.example .env.local
 | `QDRANT_URL`, `QDRANT_API_KEY` | Qdrant cluster | app (structure queries) |
 | `TUTOR_RAG_MODE` | `dense` (switch to `hybrid` after Joao's hybrid retrieval is deployed) | `/api/tutor` |
 | `EVAL_CLASS_ID` | UUID of the class holding the lecture PDFs (§3.7) | eval scripts only |
+| `MODAL_RETRIEVAL_TIMEOUT_MS`, `ASK_AI_TIMEOUT_MS` | optional; defaults are 15000 and 25000 | per-call timeouts that keep one slow call inside the 60 s function limit |
 
 ### `qdrant/.env` (collection setup script)
 
@@ -203,4 +204,5 @@ npm run eval:single -- --config A0                    # full benchmark, one conf
 | Books stuck in `processing` | open Modal → app `pdf-processor` → logs; usually a wrong Modal secret name or value |
 | Tutor returns 404 "No concept graph for this class" | run `npm run graph:seed -- --class <uuid>` |
 | Tutor returns 409 | two tabs sent at once; resend |
+| Retrieval step fails with "Hybrid retrieval was requested but the webhook did not serve it" | `TUTOR_RAG_MODE=hybrid` or `--config A2/A3` used before hybrid retrieval (J1) is deployed. Use `dense` until then |
 | Every request fails after a week of inactivity | the Supabase project is paused; restore it in the dashboard |

@@ -19,14 +19,20 @@ import {
   abstentionCorrect,
   citationPrecision,
   citedIndices,
+  outOfRangeCitations,
   recallAtK,
+  retrievalFailure,
   summarize,
   type ScoredRow,
   type SingleTurnItem,
 } from '@/eval/single-turn-metrics';
 
-/** Critic used by the system under test in A3, and as the faithfulness evaluator for every config.
- *  Set both once lib/tutor/critic.ts (J2) is merged:  makeCritic((p) => makeComplete(model)(p, { json: true })) */
+/** Wire these once lib/tutor/critic.ts (J2) is merged:
+ *  - SYSTEM_CRITIC: the critic inside the system under test (A3), on the system model:
+ *      makeCritic((p) => makeComplete(model)(p, { json: true }))
+ *  - EVALUATOR_CRITIC: faithfulness measurement for every config, on the *judge* model, so A3
+ *    is not graded by the same critic that already revised its answers:
+ *      makeCritic((p) => makeComplete(judgeModel)(p, { json: true })) */
 const SYSTEM_CRITIC: CritiqueFn | undefined = undefined;
 const EVALUATOR_CRITIC: CritiqueFn | undefined = undefined;
 
@@ -56,6 +62,8 @@ async function main() {
   const outPath = repoPath('results', 'single_turn', `${runId}.jsonl`);
   const judge = makeComplete(judgeModel);
   const scored: ScoredRow[] = [];
+  let infrastructureFailures = 0;
+  let warningCount = 0;
 
   for (const item of items) {
     let hits: RetrievalHit[] = [];
@@ -65,6 +73,16 @@ async function main() {
     try {
       const result = await runTutorTurn({ classId, graph, session: createSession(graph), studentMessage: item.question }, config, deps);
       const latencyTotalMs = Math.round(performance.now() - started);
+      // An outage would otherwise score as a correct refusal (out-of-scope) or a wrong answer.
+      const failure = retrievalFailure(result.steps);
+      if (failure) {
+        infrastructureFailures += 1;
+        appendJsonl(outPath, { runId, itemId: item.id, config: configId, model, error: `retrieval failed: ${failure}`, infrastructure: true });
+        console.error(`${item.id}: RETRIEVAL FAILED (excluded) ${failure}`);
+        continue;
+      }
+      warningCount += result.warnings.length;
+      const cited = citedIndices(result.reply);
       const verdict =
         item.type === 'in_scope' && item.gold_answer
           ? await judgeCorrectness({ question: item.question, goldAnswer: item.gold_answer, answer: result.reply }, (p) => judge(p, { json: true }))
@@ -74,8 +92,10 @@ async function main() {
           ? await EVALUATOR_CRITIC({ question: item.question, answer: result.reply, excerpts: result.excerpts })
           : null;
       const row: ScoredRow = {
+        itemType: item.type,
         judge: verdict?.correct ?? null,
-        citationPrecision: citationPrecision(citedIndices(result.reply), hits, item.gold_sources),
+        judgeError: verdict !== null && verdict.correct === null,
+        citationPrecision: citationPrecision(cited, hits, item.gold_sources),
         recallAt5: recallAtK(hits, item.gold_sources, 5),
         abstentionCorrect: abstentionCorrect(item.type, result.reply),
         faithfulness: evaluation?.supportedFraction ?? null,
@@ -83,8 +103,9 @@ async function main() {
       };
       scored.push(row);
       appendJsonl(outPath, {
-        runId, itemId: item.id, itemType: item.type, config: configId, model, ...row,
-        judgeReason: verdict?.reason ?? null, reply: result.reply, action: result.action,
+        runId, itemId: item.id, config: configId, model, ...row,
+        judgeReason: verdict?.reason ?? null, outOfRangeCitations: outOfRangeCitations(cited, hits),
+        memoryChars: result.memoryChars, reply: result.reply, action: result.action,
         retrieved: hits.map((h) => ({ fileName: h.fileName, page: h.pageNumber, score: h.score, conceptIds: h.conceptIds ?? [] })),
         critic: result.critic, latencyMs: result.latencyMs, warnings: result.warnings,
       });
@@ -95,7 +116,13 @@ async function main() {
     }
   }
 
-  const summary = { runId, config: configId, configFlags: config, model, judgeModel, items: items.length, failed: items.length - scored.length, ...summarize(scored) };
+  const summary = {
+    runId, config: configId, configFlags: config, model, judgeModel, items: items.length,
+    failed: items.length - scored.length, infrastructureFailures, warnings: warningCount,
+    // An A3 file with criticWired=false is really A2: never report it as A3.
+    criticWired: Boolean(SYSTEM_CRITIC), evaluatorCriticWired: Boolean(EVALUATOR_CRITIC),
+    ...summarize(scored),
+  };
   writeFileSync(repoPath('results', 'single_turn', `${runId}.summary.json`), `${JSON.stringify(summary, null, 2)}\n`);
   console.log(JSON.stringify(summary, null, 2));
 }

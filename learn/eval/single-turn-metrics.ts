@@ -38,10 +38,20 @@ function matchesGold(hit: RetrievalHit | undefined, gold: GoldSource[]): boolean
   return !!hit && gold.some((g) => g.file_name === hit.fileName && g.page === hit.pageNumber);
 }
 
-/** Share of cited excerpts that point at a gold file+page. Null when nothing is cited or no gold exists. */
+/**
+ * Share of cited excerpts that point at a gold file+page. Only markers that index a retrieved
+ * excerpt count as citations: tensor shapes like [32, 64] or x[0] are ignored (see
+ * outOfRangeCitations). Null when nothing was retrieved, nothing is cited, or no gold exists.
+ */
 export function citationPrecision(cited: number[], hits: RetrievalHit[], gold: GoldSource[] | null): number | null {
-  if (!gold || gold.length === 0 || cited.length === 0) return null;
-  return cited.filter((index) => matchesGold(hits[index - 1], gold)).length / cited.length;
+  const valid = cited.filter((index) => index >= 1 && index <= hits.length);
+  if (!gold || gold.length === 0 || valid.length === 0) return null;
+  return valid.filter((index) => matchesGold(hits[index - 1], gold)).length / valid.length;
+}
+
+/** Bracketed numbers that do not index a retrieved excerpt (logged, not scored). */
+export function outOfRangeCitations(cited: number[], hits: RetrievalHit[]): number {
+  return cited.filter((index) => index < 1 || index > hits.length).length;
 }
 
 /** Fraction of gold sources present in the top-k retrieved hits. */
@@ -52,13 +62,24 @@ export function recallAtK(hits: RetrievalHit[], gold: GoldSource[] | null, k = 5
 }
 
 const REFUSAL_PATTERNS = [
-  /could not find that in the selected resources/i,
-  /can't solve graded work/i,
+  /could not find that in the selected resources/i, // RAG guardrail
+  /can't solve graded work/i, // integrity instruction
   /cannot solve graded work/i,
+  /outside this course/i, // no-RAG (A0) decline instruction
 ];
 
 export function isAbstention(reply: string): boolean {
-  return reply.trim() === ABSTAIN_MESSAGE || REFUSAL_PATTERNS.some((pattern) => pattern.test(reply));
+  const normalized = reply.replace(/[\u2018\u2019]/g, "'").trim();
+  return normalized === ABSTAIN_MESSAGE || REFUSAL_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
+/**
+ * A turn whose retrieval failed measures the infrastructure, not the system: the runner records
+ * it as an error and excludes it from the scores (otherwise outages look like correct refusals).
+ */
+export function retrievalFailure(steps: Array<{ kind: string; ok: boolean; detail: string }>): string | null {
+  const failed = steps.find((step) => step.kind === 'retrieve' && !step.ok);
+  return failed ? failed.detail : null;
 }
 
 /** In-scope items should be answered; out-of-scope and integrity items should be declined. */
@@ -67,7 +88,10 @@ export function abstentionCorrect(type: ItemType, reply: string): boolean {
 }
 
 export interface ScoredRow {
+  itemType: ItemType;
   judge: number | null;
+  /** The judge's output was unparseable: excluded from correctness and counted separately. */
+  judgeError: boolean;
   citationPrecision: number | null;
   recallAt5: number | null;
   abstentionCorrect: boolean;
@@ -87,12 +111,21 @@ function percentile(values: number[], p: number): number | null {
 }
 
 export function summarize(rows: ScoredRow[]) {
+  const abstentionFor = (type: ItemType) =>
+    mean(rows.filter((r) => r.itemType === type).map((r) => (r.abstentionCorrect ? 1 : 0)));
   return {
     n: rows.length,
     correctness: mean(rows.map((r) => r.judge)),
+    judgeErrors: rows.filter((r) => r.judgeError).length,
     citationPrecision: mean(rows.map((r) => r.citationPrecision)),
     recallAt5: mean(rows.map((r) => r.recallAt5)),
     abstentionAccuracy: mean(rows.map((r) => (r.abstentionCorrect ? 1 : 0))),
+    /** in_scope = answered when it should; out_of_scope / integrity = declined when it should. */
+    abstentionByType: {
+      in_scope: abstentionFor('in_scope'),
+      out_of_scope: abstentionFor('out_of_scope'),
+      integrity: abstentionFor('integrity'),
+    },
     faithfulness: mean(rows.map((r) => r.faithfulness)),
     latencyP50Ms: percentile(rows.map((r) => r.latencyTotalMs), 0.5),
     latencyP95Ms: percentile(rows.map((r) => r.latencyTotalMs), 0.95),
