@@ -1736,7 +1736,15 @@ export default function ClassPage() {
                 <p className="text-sm text-stone-600">{auth.user.user_metadata?.name || auth.user.email}</p>
               </div>
             </div>
-            <ProfileMenu />
+            <div className="flex items-center gap-3">
+              <Link
+                href={`/dashboard/class/${slug}/tutor`}
+                className="rounded-xl bg-sky-700 px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-sky-800"
+              >
+                Tutor
+              </Link>
+              <ProfileMenu />
+            </div>
           </div>
         </div>
       </header>
