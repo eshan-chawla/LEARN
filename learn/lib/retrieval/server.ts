@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createSupabaseClient } from '@/lib/supabase';
+import { RetrievalError, searchModalRetrieval } from '@/lib/retrieval/modal-client';
 import type {
   RetrievalContentType,
-  RetrievalHit,
   RetrievalSearchRequest,
-  RetrievalSearchResponse,
 } from '@/lib/retrieval/types';
 
 const DEFAULT_LIMIT = 8;
@@ -159,83 +158,6 @@ async function authorizeClassAccess(token: string, classId: string): Promise<voi
   }
 }
 
-function mapModalHit(hit: Record<string, unknown>): RetrievalHit {
-  const contentType = hit.contentType === 'video' ? 'video' : 'pdf';
-
-  return {
-    score: typeof hit.score === 'number' ? hit.score : 0,
-    text: typeof hit.text === 'string' ? hit.text : '',
-    classId: typeof hit.classId === 'string' ? hit.classId : '',
-    contentType,
-    sourceId: typeof hit.sourceId === 'string' ? hit.sourceId : '',
-    title: typeof hit.title === 'string' ? hit.title : null,
-    fileName: typeof hit.fileName === 'string' ? hit.fileName : null,
-    storagePath: typeof hit.storagePath === 'string' ? hit.storagePath : null,
-    pageNumber: typeof hit.pageNumber === 'number' ? hit.pageNumber : null,
-    pageChunkIndex: typeof hit.pageChunkIndex === 'number' ? hit.pageChunkIndex : null,
-    chunkIndex: typeof hit.chunkIndex === 'number' ? hit.chunkIndex : null,
-    startSeconds: typeof hit.startSeconds === 'number' ? hit.startSeconds : null,
-    endSeconds: typeof hit.endSeconds === 'number' ? hit.endSeconds : null,
-    transcriptChunkIndex:
-      typeof hit.transcriptChunkIndex === 'number' ? hit.transcriptChunkIndex : null,
-    transcriptLanguage:
-      typeof hit.transcriptLanguage === 'string' ? hit.transcriptLanguage : null,
-  };
-}
-
-async function invokeModalRetrieval(
-  input: RetrievalSearchRequest
-): Promise<RetrievalSearchResponse> {
-  const modalWebhookUrl = process.env.MODAL_RETRIEVAL_WEBHOOK_URL;
-  const modalWebhookSecret = process.env.MODAL_WEBHOOK_SECRET;
-
-  if (!modalWebhookUrl || !modalWebhookSecret) {
-    throw new HttpError(
-      'Retrieval is not configured. Set MODAL_RETRIEVAL_WEBHOOK_URL and MODAL_WEBHOOK_SECRET.',
-      500
-    );
-  }
-
-  const modalResponse = await fetch(modalWebhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      webhook_secret: modalWebhookSecret,
-      query: input.query,
-      class_id: input.classId,
-      content_types: input.contentTypes,
-      source_ids: input.sourceIds,
-      limit: input.limit,
-    }),
-    cache: 'no-store',
-  });
-
-  const modalPayload = await modalResponse.json().catch(() => null);
-  if (!modalResponse.ok) {
-    throw new HttpError(
-      typeof modalPayload?.error === 'string' ? modalPayload.error : 'Failed to search content',
-      500
-    );
-  }
-
-  if (!modalPayload?.success || !Array.isArray(modalPayload?.hits)) {
-    throw new HttpError(
-      typeof modalPayload?.error === 'string'
-        ? modalPayload.error
-        : 'Retrieval service returned an invalid response',
-      500
-    );
-  }
-
-  return {
-    query: input.query,
-    classId: input.classId,
-    hits: modalPayload.hits.map((hit: Record<string, unknown>) => mapModalHit(hit)),
-    total:
-      typeof modalPayload.total === 'number' ? modalPayload.total : modalPayload.hits.length,
-  };
-}
-
 export async function handleRetrievalSearch(
   request: NextRequest,
   options: RetrievalRouteOptions = {}
@@ -246,11 +168,11 @@ export async function handleRetrievalSearch(
     const input = normalizeSearchRequest(body, options);
 
     await authorizeClassAccess(token, input.classId);
-    const response = await invokeModalRetrieval(input);
+    const response = await searchModalRetrieval(input);
 
     return NextResponse.json(response);
   } catch (error) {
-    if (error instanceof HttpError) {
+    if (error instanceof HttpError || error instanceof RetrievalError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 

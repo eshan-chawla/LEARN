@@ -2,6 +2,11 @@
 
 Each item has a single owner who writes the code, tests, and commits under their own GitHub account. The final report includes a contributions statement that matches this file.
 
+**Detailed handoff for Joao:** `handoff.md`, shared separately. Contracts that both people depend on live in code and change only through a PR that both review:
+- `learn/lib/tutor/critic-types.ts`: the Critic interface
+- `learn/lib/retrieval/types.ts`: `RetrievalSearchRequest.mode` and `RetrievalHit.conceptIds`
+- `learn/lib/tutor/pipeline.ts`: `runTutorTurn`
+
 Final submission is due **Dec 15**. The presentation is **Dec 1/3**.
 
 ## Ownership summary
@@ -18,7 +23,7 @@ Final submission is due **Dec 15**. The presentation is **Dec 1/3**.
 | Single-turn eval runner (A0–A3) | **owns (E4)** | reviews |
 | **Trajectory simulator + multi-turn runner + metrics** (M0–M2) | reviews | **owns (J3)** |
 | Analysis plots/tables (Python → vector PDF) | — | **owns (J4)** |
-| Concept graph (`data/concept_graph/dl_course.json`) | backprop → transformers half | foundations half (math, optimization, MLP) |
+| Concept graph (`data/concept_graph/{advanced,foundations}.json` → `npm run graph:build` → `dl_course.json`) | `advanced.json` (backprop → transformers) | `foundations.json` (math, optimization, MLP) |
 | Single-turn benchmark items | lectures in the first half | lectures in the second half |
 | Trajectory personas | review | author |
 | Paper | Intro, Method, Conclusion | Related Work, Experiments, Failure Analysis |
@@ -28,7 +33,7 @@ Final submission is due **Dec 15**. The presentation is **Dec 1/3**.
 
 1. Start from `main` after `feature/learner-state-engine` is merged.
 2. Create one branch per item: `feat/hybrid-retrieval`, `feat/critic`, `feat/trajectory-eval`, and so on.
-3. Make small, meaningful commits. Run `cd learn && npm test && npx tsc --noEmit && npx eslint lib app` before every push.
+3. Make small, meaningful commits. Run `cd learn && npm test && npx tsc --noEmit && npx eslint lib app eval` before every push.
 4. Open a PR and have the other person review it. Each person merges their own PRs.
 5. Check `git config user.name` / `user.email` so commits are attributed to your GitHub account.
 
@@ -50,11 +55,11 @@ Final submission is due **Dec 15**. The presentation is **Dec 1/3**.
   - A small `pytest` checks the RRF fusion and tagging logic.
   - Recall@5 for dense vs. hybrid is reported on about 10 gold questions.
 
-**Interface Eshan's pipeline will call:** the retrieval webhook accepts `"mode": "dense" | "hybrid"`, and every hit includes `"conceptIds": [...]`. `learn/lib/retrieval/types.ts` → `RetrievalHit` gains `conceptIds: string[]`.
+**Interface Eshan's pipeline will call:** the retrieval webhook accepts `"mode": "dense" | "hybrid"`, and every hit includes `"conceptIds": [...]`. The TypeScript side is already in place (`learn/lib/retrieval/types.ts`, `learn/lib/retrieval/modal-client.ts`, owned by Eshan), so J1 is Python-only.
 
 ### J2 — Grounding & integrity Critic (TypeScript; can start in parallel)
 
-**File:** `learn/lib/tutor/critic.ts`, with tests in `learn/lib/tutor/__tests__/critic.test.ts`
+**File:** `learn/lib/tutor/critic.ts`, with tests in `learn/lib/tutor/__tests__/critic.test.ts`. Import the types from `learn/lib/tutor/critic-types.ts` (already committed). `CriticVerdict` also has `warnings: string[]`. Export `makeCritic(complete): CritiqueFn` for the pipeline.
 
 ```ts
 export interface CitedExcerpt {
@@ -93,7 +98,7 @@ export async function critiqueAnswer(
 
 ### J3 — Trajectory simulator, multi-turn runner, metrics (TypeScript)
 
-**Files:** `eval/simulated-student.ts`, `eval/run-trajectories.ts`, `eval/metrics.ts`, `data/benchmark/trajectories/*.json`
+**Files:** `learn/eval/simulated-student.ts`, `learn/eval/run-trajectories.ts`, `learn/eval/trajectory-metrics.ts`, `learn/eval/stats.ts`, `data/benchmark/trajectories/*.json`. Eval code lives under `learn/` so the `@/` imports and vitest work. Run with `npx tsx --env-file=.env.local eval/<script>.ts`.
 
 - **Persona format:** known concepts, prerequisite gaps, persistent misconceptions, and a script of opening questions and distractor turns. Each turn carries **gold labels**: the true gap, the active misconceptions, the acceptable next actions, and the do-not-remediate concepts.
 - **Simulator:** an LLM role-plays the persona and must answer consistently with the hidden state. A deterministic scripted mode is also needed for reproducibility.
@@ -120,4 +125,4 @@ export async function critiqueAnswer(
   - It must run headless (no HTTP or auth) so the eval runners can call it.
 - **E2 `learn/app/api/tutor/[classId]/route.ts`.** Load and save `learner_states`, append `learner_events`, and return the decision rationale as UI steps.
 - **E3 Mastery map.** A concept-DAG view colored by status, plus a tutor panel. These are used for the demo video.
-- **E4 `eval/run-single-turn.ts`.** Runs A0–A3 on `data/benchmark/single_turn.jsonl`, measuring correctness (judge), citation precision, faithfulness, abstention, and latency.
+- **E4 `learn/eval/run-single-turn.ts`.** Runs A0–A3 on `data/benchmark/single_turn.jsonl`, measuring correctness (judge), citation precision, faithfulness, abstention, and latency.
