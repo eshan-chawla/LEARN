@@ -1,5 +1,7 @@
 # Modal Content Processing - Deployment Guide
 
+> **Full deployment guide** (all accounts, API keys, env files, S3 CORS/IAM, Vercel): [`DEPLOY.md`](../DEPLOY.md) at the repo root.
+
 This service processes PDFs and videos from S3, embeds them, and stores them in a shared Qdrant collection.
 
 Embedding model:

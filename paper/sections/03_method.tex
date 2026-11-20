@@ -1,0 +1,41 @@
+\section{Method}
+\begin{figure*}[t]
+\centering
+\resizebox{0.85\textwidth}{!}{\input{figures/architecture.tex}}
+\caption{LEARN pipeline. Blue components are introduced in this work. The learner state $S_t$ is updated from each student turn and conditions the policy and retrieval.}
+\label{fig:arch}
+\end{figure*}
+
+\subsection{Problem Formulation}
+A course has a corpus $\mathcal{D}$ of PDF pages and lecture-transcript spans and a set of concepts $C$. At turn $t$ the student sends $u_t$; the system must choose an action $a_t$ and produce a response $r_t$ that is (i) supported by cited passages from $\mathcal{D}$, (ii) compliant with assessment-integrity rules, and (iii) pedagogically appropriate to the student's latent knowledge state, which is never observed directly.
+
+\subsection{Prerequisite Graph}
+$G=(C,E)$ is a DAG; $(u,v)\in E$ means $u$ is a prerequisite of $v$. Each $c\in C$ has BKT parameters $(P(L_0),T,s,g)_c$ and a misconception catalog $\mathcal{M}_c$, where each $m\in\mathcal{M}_c$ has a description and a discriminating probe. \todo{Graph statistics: $|C|$, $|E|$, depth, number of misconceptions; how it was authored and validated.}
+
+\subsection{Learner State and Update}
+$S_t=\{(p_c,\sigma_c,A_c,n_c,\ell_c)\}_{c\in C}$ with mastery $p_c$, status $\sigma_c\in\{\texttt{unknown},\texttt{learning},\texttt{mastered},\texttt{misconception}\}$, active misconceptions $A_c$ with confidences $\mu_m$, observation count $n_c$, and last-seen turn $\ell_c$. The diagnoser emits observations $o=(c,y,m,\kappa)$. For $y\in\{0,1\}$:
+\begin{align}
+\tilde p^{(1)}&=\frac{p(1-s)}{p(1-s)+(1-p)g},\\
+\tilde p^{(0)}&=\frac{ps}{ps+(1-p)(1-g)},
+\end{align}
+\begin{equation}
+p'=\kappa\,\tilde p^{(y)}+(1-\kappa)\,p,\qquad p\leftarrow p'+(1-p')\,T.
+\end{equation}
+Misconception evidence: $\mu_m\leftarrow 1-(1-\mu_m)(1-\kappa)$; $m\in A_c$ iff $\mu_m\ge\tau_\mu$; it is cleared by a correct answer to its probe. Status follows the rule in Sec.~\todo{ref}.
+
+\subsection{State-Conditioned Control}
+\textbf{Gap localization.} For a failure on $c$, let $K=\{k\in\mathrm{anc}_2(c): p_k<\tau_{gap}\}$. We probe $k^\star=\arg\max_{k\in K}\mathrm{IG}_k$ with
+\begin{equation}
+\mathrm{IG}_k=H(p_k)-\sum_{y}P(y\mid p_k)\,H\big(\tilde p_k^{(y)}\big),
+\end{equation}
+where $P(y{=}1\mid p)=p(1-s)+(1-p)g$ and $H$ is binary entropy.
+
+\textbf{Retrieval.} Chunks carry concept tags. Query $q'=q\oplus\mathrm{terms}(c)\oplus\mathrm{terms}(W)\oplus\mathrm{desc}(A_c)$, where $W$ is the set of weak prerequisites; fused hybrid scores are reranked by $r'=r+\lambda|\mathrm{concepts}(d)\cap W|$.
+
+\textbf{Policy.} \todo{Ordered rule list with thresholds; hint level $h=\lceil H_{\max}(1-p_c)\rceil$; ZPD advance rule.}
+
+\subsection{Hybrid Cited Retrieval and Grounding Critic}
+\todo{Ingestion (pypdf pages, faster-whisper segments), chunking (500 words / 50 overlap; 220-word transcript windows), Gemini embeddings (768-d), BM25 sparse vectors, RRF ($k=60$); citation format; Critic claim decomposition, entailment check, revise/abstain.}
+
+\subsection{Implementation}
+\todo{Next.js 16 + Supabase (state tables, RLS), Modal (ingestion, retrieval), Qdrant, Gemini 2.5 models and an open-weight GLM Flash model; AWS S3 for PDFs, videos, and transcripts; structured outputs; latency budget.}

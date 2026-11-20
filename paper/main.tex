@@ -1,0 +1,35 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning}
+\usepackage{cite}
+\usepackage[hidelinks]{hyperref}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\res}[1]{\textcolor{red}{#1}} % placeholder result cell -- replace with real numbers
+
+\begin{document}
+
+\title{LEARN: State-Conditioned Tutoring with a Structured Learner Model over a Prerequisite Graph}
+
+\author{\IEEEauthorblockN{Eshan Chawla and Joao Lucas Veras}
+\IEEEauthorblockA{San Jos\'e State University\\
+Code: \url{https://github.com/eshan-chawla/LEARN} \quad
+Video: \todo{YouTube/Drive link}}}
+
+\maketitle
+
+\input{sections/00_abstract}
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_method}
+\input{sections/04_experiments}
+\input{sections/05_failure_analysis}
+\input{sections/06_conclusion}
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}

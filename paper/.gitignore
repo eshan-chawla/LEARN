@@ -1,0 +1,7 @@
+# LaTeX build outputs
+*.pdf
+*.aux
+*.log
+*.bbl
+*.blg
+*.out

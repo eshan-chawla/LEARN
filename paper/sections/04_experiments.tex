@@ -1,0 +1,47 @@
+\section{Experiments}
+\subsection{Setup}
+\textbf{Corpus.} \todo{DL course materials: number of PDFs/pages, lecture hours, chunks.}
+\textbf{Single-turn benchmark.} \todo{N items: in-scope / out-of-scope / integrity; gold answers and gold pages; annotation protocol.}
+\textbf{Trajectory benchmark.} \todo{N personas $\times$ turns; hidden state (gaps, misconceptions); scripted vs.\ LLM-simulated; distractor turns; per-turn gold labels.}
+\textbf{Metrics.} \todo{Define each metric precisely, especially unnecessary-remediation rate and next-action accuracy.}
+\textbf{Hardware/software.} \todo{Models and versions, temperatures, seeds, judge model, cost accounting.}
+
+\subsection{Component Ablation (Single-Turn)}
+\begin{table}[h]
+\centering\small
+\caption{Component ablation. \res{Red} cells are placeholders.}
+\begin{tabular}{lcccc}
+\toprule
+Config & Correct & Cit.\ P & Faithful & Abstain \\
+\midrule
+A0 No RAG & \res{--} & -- & \res{--} & \res{--} \\
+A1 Dense RAG & \res{--} & \res{--} & \res{--} & \res{--} \\
+A2 Hybrid + citations & \res{--} & \res{--} & \res{--} & \res{--} \\
+A3 + Critic & \res{--} & \res{--} & \res{--} & \res{--} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Memory Comparison (Multi-Turn)}
+\begin{table}[h]
+\centering\small
+\caption{Memory conditions on trajectories (mean, 95\% CI over 3 seeds).}
+\begin{tabular}{lcccc}
+\toprule
+Memory & Gap F1 & Unnec.\ Rem.\,$\downarrow$ & Next-act. & Brier\,$\downarrow$ \\
+\midrule
+M0 None & \res{--} & \res{--} & \res{--} & -- \\
+M1 Raw history & \res{--} & \res{--} & \res{--} & -- \\
+M1b Summary & \res{--} & \res{--} & \res{--} & -- \\
+M2 Structured state & \res{--} & \res{--} & \res{--} & \res{--} \\
+\bottomrule
+\end{tabular}
+\end{table}
+\todo{Figure: gap-detection rate vs.\ turn index per memory condition (vector PDF from analysis/make\_plots.py).}
+\todo{Mechanism ablation within M2: disable IG probing / state-conditioned retrieval / hint scaling one at a time.}
+
+\subsection{Model Comparison and Cost}
+\todo{Gemini 2.5 Flash-Lite vs.\ Gemini 2.5 Flash vs.\ GLM Flash (open weights) on best config: quality, JSON validity, p50/p95 latency, \$/turn.}
+
+\subsection{Qualitative Example}
+\todo{Side-by-side trajectory excerpt: raw-history tutor re-explains backprop; structured-state tutor probes chain rule.}

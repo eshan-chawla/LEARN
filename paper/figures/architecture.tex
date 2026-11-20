@@ -1,0 +1,33 @@
+% Shared TikZ architecture diagram (vector). Requires: \usepackage{tikz} \usetikzlibrary{arrows.meta,positioning}
+\begin{tikzpicture}[
+  font=\scriptsize,
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=8mm, minimum width=19mm, inner sep=2pt, fill=white},
+  new/.style={box, draw=blue!70!black, fill=blue!6, thick},
+  arr/.style={-{Stealth[length=1.6mm]}, semithick},
+]
+  % Row 1: understanding the student
+  \node[box] (q) at (0,0) {Student turn $u_t$};
+  \node[new] (diag) at (3.0,0) {Diagnoser\\(structured JSON)};
+  \node[new] (state) at (6.0,0) {Learner state $S_t$\\$p_c$, $\sigma_c$, $A_c$};
+  \node[new] (graph) at (6.0,1.3) {Prerequisite DAG\\$G=(C,E)$, $\mathcal{M}_c$};
+  \node[new] (policy) at (9.0,0) {Policy $\pi(S_t,u_t)$\\action $a_t$};
+  % Row 2: grounded generation
+  \node[new] (sret) at (0,-1.6) {State-conditioned\\query + rerank};
+  \node[box] (ret) at (3.0,-1.6) {Hybrid retrieval\\dense + BM25 (RRF)};
+  \node[box] (kb) at (3.0,-2.9) {Course KB (Qdrant)\\PDF pages, video spans};
+  \node[box] (gen) at (6.0,-1.6) {Executor LLM\\answer / hint / probe};
+  \node[new] (critic) at (9.0,-1.6) {Grounding \&\\integrity Critic};
+  \node[box] (out) at (9.0,-2.9) {Cited response};
+
+  \draw[arr] (q) -- (diag);
+  \draw[arr] (diag) -- node[above]{$o_t$} (state);
+  \draw[arr] (graph) -- (state);
+  \draw[arr] (state) -- (policy);
+  \draw[arr] (policy.south) -- ++(0,-0.35) -| (sret.north);
+  \draw[arr] (sret) -- (ret);
+  \draw[arr] (kb) -- (ret);
+  \draw[arr] (ret) -- (gen);
+  \draw[arr] (gen) -- (critic);
+  \draw[arr] (critic) -- (out);
+  \draw[arr, dashed] (critic.north west) to[bend right=30] node[above]{revise} (gen.north east);
+\end{tikzpicture}

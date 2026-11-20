@@ -1,5 +1,7 @@
 # Learn - Student Learning Aid Platform
 
+> **Full deployment guide** (all accounts, API keys, env files, S3 CORS/IAM, Vercel): [`DEPLOY.md`](../DEPLOY.md) at the repo root.
+
 A Next.js application that helps students organize their classes, upload PDFs with AI-powered processing, record lectures, process transcripts for retrieval, and take private markdown notes.
 
 ## Features

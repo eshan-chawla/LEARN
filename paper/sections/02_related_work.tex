@@ -1,0 +1,10 @@
+\section{Related Work}
+\textbf{Retrieval-augmented and cited generation.} RAG~\cite{lewis2020rag} with dense retrievers~\cite{karpukhin2020dpr} grounds generation in external text; lexical BM25~\cite{robertson2009bm25} remains strong for technical terms, and reciprocal rank fusion~\cite{cormack2009rrf} is a simple way to combine the two. ALCE~\cite{gao2023alce} evaluates generation with citations, and RAGAS~\cite{es2024ragas} proposes reference-free faithfulness metrics. \todo{Position our hybrid + citation pipeline as an engineering baseline, not the contribution.}
+
+\textbf{Self-critique.} Self-Refine~\cite{madaan2023selfrefine}, Reflexion~\cite{shinn2023reflexion}, and Self-RAG~\cite{asai2024selfrag} use model feedback to revise outputs. Our Critic is a narrower claim-level grounding check against cited excerpts.
+
+\textbf{Memory for LLM agents.} MemGPT~\cite{packer2023memgpt} and generative agents~\cite{park2023generative} store and summarize unstructured interaction history. We instead store a \emph{typed}, domain-specific state, and compare against both raw history and summary memory.
+
+\textbf{Knowledge tracing and learner models.} BKT~\cite{corbett1994bkt} models mastery as a hidden binary variable per skill; deep knowledge tracing~\cite{piech2015dkt} learns it from data. Knowledge space theory~\cite{doignon1985spaces} formalizes prerequisite structure. These models assume graded item responses; we update from LLM-diagnosed free-text turns.
+
+\textbf{LLM tutors.} Surveys discuss opportunities and risks of LLMs in education~\cite{kasneci2023chatgpt}; MathDial~\cite{macina2023mathdial} studies tutoring dialogues grounded in student misconceptions. \todo{Add 2--3 recent LLM-tutor / simulated-student papers after a literature pass; verify every citation.}

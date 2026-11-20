@@ -1,0 +1,14 @@
+\section{Introduction}
+Students increasingly turn to general-purpose LLM chatbots for course help. In a course setting these tools have three problems: they can hallucinate or cite nothing, they may reveal solutions to graded work, and---the problem we focus on---they do not model the student. A student who cannot follow backpropagation may in fact be missing the chain rule; a student who repeatedly says gradients ``flow forward'' holds a specific misconception that a generic re-explanation will not fix. Raw chat history contains this evidence only implicitly, so it is diluted as the conversation grows.
+
+Retrieval-augmented generation (RAG)~\cite{lewis2020rag} grounds answers in course material, and knowledge tracing~\cite{corbett1994bkt,piech2015dkt} models mastery from graded exercises, but these two lines of work are rarely combined so that the learner model \emph{controls} what an LLM tutor retrieves and does next.
+
+\todo{One paragraph on the challenge: noisy free-text evidence, unobserved prerequisites, the need to avoid unnecessary remediation, evaluation without a human study.}
+
+\noindent\textbf{Contributions.}
+\begin{itemize}
+\item A formal, concept-level \textbf{learner state} (BKT mastery, discrete status, and explicit misconception sets) over a prerequisite DAG, updated from free-text turns by a confidence-weighted diagnoser.
+\item \textbf{State-conditioned control}: information-gain-based prerequisite probing, state-conditioned hybrid retrieval, mastery-scaled hints, and a next-action policy over the zone of proximal development.
+\item A \textbf{controlled multi-turn trajectory benchmark} for a deep-learning course with hidden ground-truth gaps and misconceptions, and metrics for gap identification, unnecessary remediation, next-action accuracy, and state calibration.
+\item A \textbf{granular ablation} isolating hybrid retrieval, citations, the grounding Critic, and the learner state, plus a secondary comparison across Gemini and an open-weight GLM model; code and data are released.
+\end{itemize}

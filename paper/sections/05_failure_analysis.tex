@@ -1,0 +1,11 @@
+\section{Failure Analysis, Negative Results, and Limitations}
+\todo{For each item: concrete example, root-cause diagnosis, frequency, and what we tried.}
+\begin{itemize}
+\item \textbf{Diagnoser errors propagate.} A mislabeled turn lowers $p_k$ for a mastered prerequisite and triggers unnecessary probing. \todo{rate; effect of $\kappa$-weighting.}
+\item \textbf{BKT parameter misspecification.} Hand-set $(T,s,g)$ may be miscalibrated. \todo{calibration plot; sensitivity sweep.}
+\item \textbf{Simulated-student realism.} Personas answer more consistently than real students. \todo{human spot-check findings.}
+\item \textbf{Small-model structured output.} \todo{JSON validity of the open-weight model; fallback behavior.}
+\item \textbf{Critic over-abstention.} \todo{cases where correct answers were rejected; precision/recall trade-off.}
+\item \textbf{Negative results.} \todo{Any hypothesis that did not hold, e.g., hybrid retrieval not beating dense on some question types.}
+\end{itemize}
+\textbf{Limitations.} Single course, no human-subject learning-gain study, hand-authored graph. \todo{expand.}
