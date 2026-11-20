@@ -33,8 +33,10 @@ CREATE TABLE IF NOT EXISTS public.learner_states (
   class_id UUID NOT NULL REFERENCES public.classes(id) ON DELETE CASCADE,
   graph_id UUID NOT NULL REFERENCES public.concept_graphs(id) ON DELETE CASCADE,
   state JSONB NOT NULL CHECK ((state ->> 'schemaVersion') = '1'),
-  -- Tutor bookkeeping between turns, e.g. the probe awaiting an answer.
-  pending_probe JSONB,
+  -- Tutor bookkeeping between turns (TutorContext in lib/tutor/session-store.ts):
+  -- { history: last 6 {role, content} turns, summary: string | null,
+  --   pendingProbe: { conceptId, misconceptionId } | null }
+  tutor_context JSONB NOT NULL DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, class_id)
 );
