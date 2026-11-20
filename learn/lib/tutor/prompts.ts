@@ -82,7 +82,11 @@ export interface TutorPromptArgs {
 
 export function buildTutorPrompt(args: TutorPromptArgs): string {
   const { studentMessage, excerpts, memoryBlock, decision, graph, ragEnabled } = args;
-  const lines: string[] = ['You are LEARN, a patient tutor for a university deep learning course.', ''];
+  const lines: string[] = [
+    'You are LEARN, a patient tutor for a university deep learning course.',
+    'Academic integrity: if the student asks you to solve a graded assignment, quiz or exam problem for them, do not give the solution; start the reply with "I can\'t solve graded work for you" and offer a hint or a related worked example instead.',
+    '',
+  ];
 
   if (ragEnabled) {
     lines.push(buildAskAiGuardrailPrompt('the retrieved course excerpts'), '');

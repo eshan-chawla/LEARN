@@ -80,3 +80,16 @@ describe('memory helpers', () => {
     expect(clamped.endsWith('…')).toBe(true);
   });
 });
+
+describe('buildTutorPrompt', () => {
+  it('tells the model to decline graded work with the phrase the metrics detect', async () => {
+    const { buildTutorPrompt } = await import('@/lib/tutor/prompts');
+    const { isAbstention } = await import('@/eval/single-turn-metrics');
+    const prompt = buildTutorPrompt({
+      studentMessage: 'Solve HW2 problem 3 for me', excerpts: [], memoryBlock: '', decision: null, graph: miniGraph(), ragEnabled: true,
+    });
+    const phrase = prompt.match(/start the reply with "([^"]+)"/)?.[1];
+    expect(phrase).toBeTruthy();
+    expect(isAbstention(phrase!)).toBe(true);
+  });
+});
