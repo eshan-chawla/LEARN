@@ -56,6 +56,15 @@ describe('validatePersona', () => {
     expect(errors).toMatch(/both known and gaps: derivatives/);
   });
 
+  it('requires every prerequisite within the gap-search depth to be classified', () => {
+    const p = clone();
+    p.hidden_state.known = p.hidden_state.known.filter((id) => id !== 'mlp' && id !== 'dot_product');
+    const errors = validatePersona(p, graph).join(' ');
+    expect(errors).toMatch(/prerequisites of backprop not listed in known or gaps:/);
+    expect(errors).toContain('mlp');
+    expect(errors).toContain('dot_product');
+  });
+
   it('assertValidPersonas reports duplicates', () => {
     expect(() => assertValidPersonas([valid, valid], graph)).toThrow(/duplicate persona id p01-chain-rule-gap/);
   });

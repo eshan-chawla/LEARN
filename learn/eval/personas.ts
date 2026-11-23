@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { ConceptGraph } from '@/lib/tutor/concept-graph';
 import type { TutorAction } from '@/lib/tutor/policy';
+import { DEFAULT_THRESHOLDS } from '@/lib/tutor/types';
 import type { Persona } from '@/eval/trajectory-types';
 
 /** Persona cards live in data/benchmark/trajectories/<id>.json, one persona per file. */
@@ -52,6 +53,18 @@ export function validatePersona(persona: Persona, graph: ConceptGraph): string[]
   const overlap = hidden.known.filter((id) => hidden.gaps.includes(id));
   if (overlap.length) where(`concepts both known and gaps: ${overlap.join(', ')}`);
   if (hidden.gaps.length + hidden.misconceptions.length === 0) where('needs at least one gap or misconception');
+
+  // Every prerequisite the tutor may probe (ancestors of the target within the gap-search depth)
+  // must be classified. Otherwise the scripted student answers "don't know" for it and the tutor
+  // correctly chases a gap the persona author never intended.
+  if (typeof persona.target_concept === 'string' && graph.has(persona.target_concept)) {
+    const classified = new Set([...hidden.known, ...hidden.gaps]);
+    const missing = graph
+      .ancestorsWithin(persona.target_concept, DEFAULT_THRESHOLDS.gapSearchDepth)
+      .filter((ancestor) => !classified.has(ancestor.conceptId))
+      .map((ancestor) => ancestor.conceptId);
+    if (missing.length) where(`prerequisites of ${persona.target_concept} not listed in known or gaps: ${missing.join(', ')}`);
+  }
 
   const turns = persona.turns ?? [];
   if (turns.length < PERSONA_LIMITS.minTurns || turns.length > PERSONA_LIMITS.maxTurns) {
