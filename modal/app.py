@@ -5,6 +5,7 @@ Deploy with: modal deploy modal/app.py
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -19,19 +20,24 @@ from webhooks.search_content import search_content_webhook_impl
 
 BASE_DIR = Path(__file__).resolve().parent
 
-app = modal.App("pdf-processor")
+# Override with MODAL_APP_NAME=learn-dev when developing so dev deploys get their own
+# webhook URLs and never replace the production app.
+APP_NAME = os.environ.get("MODAL_APP_NAME", "pdf-processor")
+
+app = modal.App(APP_NAME)
 
 image = (
     modal.Image.debian_slim()
     .apt_install("ffmpeg")
     .pip_install(
         "boto3==1.34.131",
+        "fastembed==0.4.2",
         "faster-whisper==1.1.1",
         "fastapi[standard]==0.115.0",
         "google-genai==1.62.0",
         "httpx>=0.27,<1",
         "pypdf==4.2.0",
-        "qdrant-client==1.7.0",
+        "qdrant-client==1.12.1",
     )
     .add_local_dir(str(BASE_DIR / "jobs"), remote_path="/root/jobs")
     .add_local_dir(str(BASE_DIR / "webhooks"), remote_path="/root/webhooks")
