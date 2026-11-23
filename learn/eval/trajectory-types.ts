@@ -70,6 +70,8 @@ export interface TrajectoryTurnLog {
   state: LearnerState | null;
   /** Retrieval infrastructure failed this turn; excluded from scoring like the single-turn runner. */
   retrievalFailed: boolean;
+  /** The tutor turn threw (model/API outage). The turn is logged and excluded from scoring. */
+  error?: string | null;
   memoryChars: number;
   latencyMs: Record<string, number>;
 }

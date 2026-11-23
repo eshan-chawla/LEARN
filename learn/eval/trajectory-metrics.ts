@@ -1,4 +1,5 @@
 import type { TutorAction } from '@/lib/tutor/policy';
+import { bootstrapCI, finiteValues, type ConfidenceInterval } from '@/eval/stats';
 import type { Trajectory, TrajectoryTurnLog } from '@/eval/trajectory-types';
 
 /**
@@ -37,9 +38,9 @@ export function matchesAcceptable(action: TutorAction | null, acceptable: string
   return acceptable.some((gold) => (gold.includes(':') ? gold === key : gold === action.type));
 }
 
-/** Turns that count for scoring: retrieval-infrastructure failures are excluded. */
+/** Turns that count for scoring: retrieval failures and tutor-call errors (infrastructure) are excluded. */
 export function scoredTurns(trajectory: Trajectory): TrajectoryTurnLog[] {
-  return trajectory.turns.filter((turn) => !turn.retrievalFailed);
+  return trajectory.turns.filter((turn) => !turn.retrievalFailed && !turn.error);
 }
 
 /** Groups JSONL rows into trajectories by (condition, persona, seed), turns sorted by index. */
@@ -349,4 +350,64 @@ export function scoreTrajectory(trajectory: Trajectory): TrajectoryScore {
     calibration: structured ? { pairs, brier: brierScore(pairs), auc: rocAuc(pairs) } : null,
     maxMemoryChars: trajectory.turns.reduce((max, turn) => Math.max(max, turn.memoryChars), 0),
   };
+}
+
+// --- Condition summary --------------------------------------------------------------------
+
+export interface ConditionSummary {
+  condition: string;
+  trajectories: number;
+  scoredTurns: number;
+  excludedTurns: number;
+  /** Per-trajectory means with 95% bootstrap CIs (null when no trajectory defines the metric). */
+  nextActionAccuracy: ConfidenceInterval | null;
+  unnecessaryRemediation: ConfidenceInterval | null;
+  gapF1: ConfidenceInterval | null;
+  turnsToDetection: ConfidenceInterval | null;
+  misconceptionDetectionRate: ConfidenceInterval | null;
+  misconceptionPersistenceRate: ConfidenceInterval | null;
+  brier: ConfidenceInterval | null;
+  auc: ConfidenceInterval | null;
+  /** Pooled (micro) gap P/R/F1 over all trajectories. */
+  gapMicro: PrecisionRecallF1;
+  misconceptionFalseAlarms: number;
+  maxMemoryChars: number;
+}
+
+function perTrajectoryGapF1(score: TrajectoryScore): number | null {
+  return precisionRecallF1(score.gap.truePositives, score.gap.falsePositives, score.gap.falseNegatives).f1;
+}
+
+function rate(values: Array<boolean | null>): number | null {
+  const defined = values.filter((v): v is boolean => v !== null);
+  return defined.length === 0 ? null : defined.filter(Boolean).length / defined.length;
+}
+
+/** The trajectory is the resampling unit, so CIs reflect persona-to-persona variation. */
+export function summarizeCondition(condition: string, scores: TrajectoryScore[], seed = 1): ConditionSummary {
+  const ci = (values: Array<number | null | undefined>) => bootstrapCI(finiteValues(values), undefined, undefined, undefined, seed);
+  return {
+    condition,
+    trajectories: scores.length,
+    scoredTurns: scores.reduce((sum, s) => sum + s.scoredTurns, 0),
+    excludedTurns: scores.reduce((sum, s) => sum + s.excludedTurns, 0),
+    nextActionAccuracy: ci(scores.map((s) => s.nextActionAccuracy.value)),
+    unnecessaryRemediation: ci(scores.map((s) => s.unnecessaryRemediation.value)),
+    gapF1: ci(scores.map(perTrajectoryGapF1)),
+    turnsToDetection: ci(scores.map((s) => s.gap.turnsToDetection)),
+    misconceptionDetectionRate: ci(scores.map((s) => rate(s.misconceptions.results.map((r) => r.detected)))),
+    misconceptionPersistenceRate: ci(scores.map((s) => rate(s.misconceptions.results.map((r) => r.persistent)))),
+    brier: ci(scores.map((s) => s.calibration?.brier)),
+    auc: ci(scores.map((s) => s.calibration?.auc)),
+    gapMicro: aggregateGapIdentification(scores.map((s) => s.gap)),
+    misconceptionFalseAlarms: scores.reduce((sum, s) => sum + s.misconceptions.falseAlarms, 0),
+    maxMemoryChars: scores.reduce((max, s) => Math.max(max, s.maxMemoryChars), 0),
+  };
+}
+
+/** Scores JSONL rows and summarizes each condition, in first-seen condition order. */
+export function summarizeRows(rows: TrajectoryTurnLog[], seed = 1): ConditionSummary[] {
+  const scores = groupTrajectories(rows).map(scoreTrajectory);
+  const conditions = [...new Set(scores.map((s) => s.condition))];
+  return conditions.map((condition) => summarizeCondition(condition, scores.filter((s) => s.condition === condition), seed));
 }
