@@ -3,13 +3,18 @@ import type { TutorAction } from '@/lib/tutor/policy';
 import {
   actionKey,
   aggregateGapIdentification,
+  brierScore,
+  calibrationPairs,
   gapIdentification,
   groupTrajectories,
   matchesAcceptable,
   misconceptionDetection,
   nextActionAccuracy,
   precisionRecallF1,
+  rocAuc,
   safeRatio,
+  scoreTrajectory,
+  unnecessaryRemediation,
 } from '@/eval/trajectory-metrics';
 import type { Trajectory, TrajectoryTurnLog } from '@/eval/trajectory-types';
 import type { LearnerState } from '@/lib/tutor/types';
@@ -162,5 +167,93 @@ describe('misconceptionDetection', () => {
       trajectory([{ action: ACT.misconception('backprop.M1') }, { kind: 'distractor', action: ACT.answer(null) }, { action: ACT.answer() }])
     );
     expect(result.results[0].persistent).toBeNull();
+  });
+});
+
+function masteryState(mastery: Record<string, number>, seen = true): LearnerState {
+  const concepts: LearnerState['concepts'] = {};
+  for (const [conceptId, p] of Object.entries(mastery)) {
+    concepts[conceptId] = { conceptId, mastery: p, observations: seen ? 1 : 0, lastSeenTurn: seen ? 0 : null, misconceptions: {} };
+  }
+  return { schemaVersion: 1, turn: 1, concepts };
+}
+
+describe('unnecessaryRemediation', () => {
+  it('remediating a known concept is unnecessary; misconception remediation counts by its concept', () => {
+    const result = unnecessaryRemediation(
+      trajectory([
+        { action: ACT.remediate('derivatives') },
+        { action: ACT.remediate('chain_rule') },
+        { action: ACT.misconception('gradient_descent.M1', 'gradient_descent') },
+        { action: ACT.probe('derivatives') },
+      ])
+    );
+    expect(result).toEqual({ hits: 2, total: 3, value: 2 / 3 });
+  });
+
+  it('falls back to hidden.known when the turn has no do_not_remediate, and is null with no remediations', () => {
+    const fallback = unnecessaryRemediation(
+      trajectory([{ action: ACT.remediate('matrix_multiplication'), gold: { acceptable_actions: ['answer'] } }])
+    );
+    expect(fallback.value).toBe(1);
+    expect(unnecessaryRemediation(trajectory([{ action: ACT.answer() }])).value).toBeNull();
+  });
+});
+
+describe('calibration', () => {
+  it('pairs seen known/gap concepts from the last logged state', () => {
+    const pairs = calibrationPairs(
+      trajectory([
+        { state: masteryState({ chain_rule: 0.9, derivatives: 0.1 }) },
+        { state: masteryState({ chain_rule: 0.2, derivatives: 0.85, backprop: 0.5 }) },
+        { state: null },
+      ])
+    );
+    expect(pairs).toEqual([
+      { conceptId: 'derivatives', predicted: 0.85, actual: 1 },
+      { conceptId: 'chain_rule', predicted: 0.2, actual: 0 },
+    ]);
+  });
+
+  it('ignores concepts that were never observed', () => {
+    expect(calibrationPairs(trajectory([{ state: masteryState({ derivatives: 0.3 }, false) }]))).toEqual([]);
+  });
+
+  it('Brier score and AUC', () => {
+    const perfect = [
+      { conceptId: 'a', predicted: 1, actual: 1 as const },
+      { conceptId: 'b', predicted: 0, actual: 0 as const },
+    ];
+    expect(brierScore(perfect)).toBe(0);
+    expect(rocAuc(perfect)).toBe(1);
+
+    const inverted = perfect.map((p) => ({ ...p, predicted: 1 - p.predicted }));
+    expect(brierScore(inverted)).toBe(1);
+    expect(rocAuc(inverted)).toBe(0);
+
+    const tied = perfect.map((p) => ({ ...p, predicted: 0.5 }));
+    expect(rocAuc(tied)).toBe(0.5);
+    expect(brierScore(tied)).toBe(0.25);
+
+    expect(brierScore([])).toBeNull();
+    expect(rocAuc([perfect[0]])).toBeNull();
+  });
+});
+
+describe('scoreTrajectory', () => {
+  it('only computes calibration for structured memory and reports excluded turns and memory size', () => {
+    const structured = scoreTrajectory(
+      trajectory([
+        { action: ACT.probe('chain_rule'), memoryChars: 1200, state: masteryState({ chain_rule: 0.3, derivatives: 0.9 }) },
+        { action: null, retrievalFailed: true, memoryChars: 3900 },
+      ])
+    );
+    expect(structured.scoredTurns).toBe(1);
+    expect(structured.excludedTurns).toBe(1);
+    expect(structured.maxMemoryChars).toBe(3900);
+    expect(structured.calibration?.auc).toBe(1);
+
+    const raw = scoreTrajectory(trajectory([{ memory: 'raw', action: ACT.answer() }]));
+    expect(raw.calibration).toBeNull();
   });
 });

@@ -237,3 +237,116 @@ export function misconceptionDetection(
 
   return { results, falseAlarms };
 }
+
+// --- Unnecessary remediation --------------------------------------------------------------
+
+/** The concept a remediation targets, or null for non-remediation actions. */
+export function remediatedConcept(action: TutorAction | null): string | null {
+  if (action?.type === 'remediate_prerequisite') return action.prerequisiteId;
+  if (action?.type === 'remediate_misconception') return action.conceptId;
+  return null;
+}
+
+/**
+ * Remediations of concepts the student already knows / all remediations. The turn's
+ * do_not_remediate list is used when present, otherwise the persona's hidden.known.
+ */
+export function unnecessaryRemediation(trajectory: Trajectory): CountMetric {
+  let unnecessary = 0;
+  let total = 0;
+  for (const turn of scoredTurns(trajectory)) {
+    const concept = remediatedConcept(turn.action);
+    if (concept === null) continue;
+    total += 1;
+    const known = turn.gold.do_not_remediate ?? trajectory.hidden.known;
+    if (known.includes(concept)) unnecessary += 1;
+  }
+  return countMetric(unnecessary, total);
+}
+
+// --- Calibration (structured memory only) -------------------------------------------------
+
+export interface CalibrationPair {
+  conceptId: string;
+  /** p_c from the logged learner state. */
+  predicted: number;
+  /** Hidden mastery: known = 1, gap = 0. */
+  actual: 0 | 1;
+}
+
+/**
+ * (p_c, hidden mastery) for every known/gap concept the tutor has seen, from the last scored
+ * turn that logged a state. Concepts never observed keep their prior and are left out.
+ */
+export function calibrationPairs(trajectory: Trajectory): CalibrationPair[] {
+  const lastWithState = [...scoredTurns(trajectory)].reverse().find((turn) => turn.state !== null);
+  if (!lastWithState?.state) return [];
+
+  const labels = new Map<string, 0 | 1>();
+  for (const id of trajectory.hidden.known) labels.set(id, 1);
+  for (const id of trajectory.hidden.gaps) labels.set(id, 0);
+
+  const pairs: CalibrationPair[] = [];
+  for (const [conceptId, actual] of labels) {
+    const conceptState = lastWithState.state.concepts[conceptId];
+    if (!conceptState) continue;
+    const seen = conceptState.observations > 0 || conceptState.lastSeenTurn !== null;
+    if (seen) pairs.push({ conceptId, predicted: conceptState.mastery, actual });
+  }
+  return pairs;
+}
+
+export function brierScore(pairs: CalibrationPair[]): number | null {
+  if (pairs.length === 0) return null;
+  return pairs.reduce((sum, p) => sum + (p.predicted - p.actual) ** 2, 0) / pairs.length;
+}
+
+/** ROC-AUC as the Mann-Whitney probability P(p_known > p_gap), ties count 1/2. Null if a class is missing. */
+export function rocAuc(pairs: CalibrationPair[]): number | null {
+  const positives = pairs.filter((p) => p.actual === 1).map((p) => p.predicted);
+  const negatives = pairs.filter((p) => p.actual === 0).map((p) => p.predicted);
+  if (positives.length === 0 || negatives.length === 0) return null;
+
+  let wins = 0;
+  for (const pos of positives) {
+    for (const neg of negatives) wins += pos > neg ? 1 : pos === neg ? 0.5 : 0;
+  }
+  return wins / (positives.length * negatives.length);
+}
+
+// --- Per-trajectory summary ----------------------------------------------------------------
+
+export interface TrajectoryScore {
+  personaId: string;
+  condition: string;
+  seed: number;
+  scoredTurns: number;
+  excludedTurns: number;
+  nextActionAccuracy: CountMetric;
+  gap: GapIdentification;
+  misconceptions: MisconceptionDetection;
+  unnecessaryRemediation: CountMetric;
+  calibration: { pairs: CalibrationPair[]; brier: number | null; auc: number | null } | null;
+  /** Largest realized memory block in the trajectory (the paper reports ≤ 4000 chars). */
+  maxMemoryChars: number;
+}
+
+export function scoreTrajectory(trajectory: Trajectory): TrajectoryScore {
+  const scored = scoredTurns(trajectory);
+  const structured = trajectory.turns.some((turn) => turn.memory === 'structured');
+  const pairs = structured ? calibrationPairs(trajectory) : [];
+
+  return {
+    personaId: trajectory.personaId,
+    condition: trajectory.condition,
+    seed: trajectory.seed,
+    scoredTurns: scored.length,
+    excludedTurns: trajectory.turns.length - scored.length,
+    nextActionAccuracy: nextActionAccuracy(trajectory),
+    gap: gapIdentification(trajectory),
+    misconceptions: misconceptionDetection(trajectory),
+    unnecessaryRemediation: unnecessaryRemediation(trajectory),
+    calibration: structured ? { pairs, brier: brierScore(pairs), auc: rocAuc(pairs) } : null,
+    maxMemoryChars: trajectory.turns.reduce((max, turn) => Math.max(max, turn.memoryChars), 0),
+  };
+}
