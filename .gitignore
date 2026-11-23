@@ -5,3 +5,5 @@ qdrant/.env
 !.env.example
 !.env.*.example
 .DS_Store
+.venv/
+.pytest_cache/

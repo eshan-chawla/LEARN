@@ -4,6 +4,8 @@ import os
 from typing import Any, Callable, Dict, List
 
 ALLOWED_CONTENT_TYPES = {"pdf", "video"}
+ALLOWED_MODES = ("dense", "hybrid")
+DEFAULT_MODE = "dense"
 DEFAULT_LIMIT = 8
 MAX_LIMIT = 20
 
@@ -49,6 +51,18 @@ def _normalize_limit(value: Any) -> int:
     return min(parsed_limit, MAX_LIMIT)
 
 
+def _normalize_mode(value: Any) -> str:
+    """Optional; omitted/null means dense (the A1 baseline). Anything else is rejected
+    rather than coerced, so a typo can never silently run the wrong ablation."""
+    if value is None:
+        return DEFAULT_MODE
+
+    if not isinstance(value, str) or value.strip().lower() not in ALLOWED_MODES:
+        raise ValueError(f"mode must be one of: {', '.join(ALLOWED_MODES)}")
+
+    return value.strip().lower()
+
+
 def search_content_webhook_impl(
     data: Dict[str, Any],
     perform_search: Callable[..., Dict[str, Any]],
@@ -78,12 +92,21 @@ def search_content_webhook_impl(
         }
 
     try:
+        mode = _normalize_mode(data.get("mode"))
+    except ValueError as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+        }
+
+    try:
         return perform_search(
             query=query,
             class_id=class_id,
             content_types=_normalize_content_types(data.get("content_types")),
             source_ids=_normalize_string_list(data.get("source_ids"), "source_ids"),
             limit=_normalize_limit(data.get("limit")),
+            mode=mode,
         )
     except Exception as exc:
         return {

@@ -15,6 +15,9 @@ from urllib import error, parse, request
 DEFAULT_COLLECTION_NAME = "class_content_embeddings"
 DEFAULT_VECTOR_SIZE = 768
 DEFAULT_DISTANCE = "Cosine"
+# Named vectors used by the hybrid collection. Keep in sync with modal/lib/constants.py.
+DENSE_VECTOR_NAME = "dense"
+SPARSE_VECTOR_NAME = "bm25"
 ENV_FILE_PATH = Path(__file__).with_name(".env")
 
 
@@ -30,6 +33,32 @@ DEFAULT_INDEXES = [
     PayloadIndex(field_name="source_id", field_schema="uuid"),
     PayloadIndex(field_name="page_number", field_schema="integer"),
 ]
+
+# Extra indexes only the hybrid collection needs (concept tagging writes concept_ids).
+HYBRID_EXTRA_INDEXES = [
+    PayloadIndex(field_name="concept_ids", field_schema="keyword"),
+]
+
+
+def build_collection_config(*, vector_size: int, distance: str, hybrid: bool) -> dict[str, Any]:
+    """Request body for PUT /collections/{name}.
+
+    Legacy (default): a single unnamed dense vector, exactly as before.
+    Hybrid: a named dense vector plus a named sparse BM25 vector whose IDF is computed
+    server-side (modifier "idf"), so documents only store term frequencies.
+    """
+    dense = {"size": vector_size, "distance": distance}
+    if not hybrid:
+        return {"vectors": dense}
+
+    return {
+        "vectors": {DENSE_VECTOR_NAME: dense},
+        "sparse_vectors": {SPARSE_VECTOR_NAME: {"modifier": "idf"}},
+    }
+
+
+def indexes_for(*, hybrid: bool) -> list[PayloadIndex]:
+    return DEFAULT_INDEXES + (HYBRID_EXTRA_INDEXES if hybrid else [])
 
 
 def load_env_file(path: Path) -> None:
@@ -110,6 +139,7 @@ def create_collection(
     api_key: str | None,
     vector_size: int,
     distance: str,
+    hybrid: bool = False,
     ssl_context: ssl.SSLContext | None,
 ) -> None:
     status, body = qdrant_request(
@@ -117,12 +147,11 @@ def create_collection(
         base_url=base_url,
         path=f"/collections/{collection}",
         api_key=api_key,
-        payload={
-            "vectors": {
-                "size": vector_size,
-                "distance": distance,
-            }
-        },
+        payload=build_collection_config(
+            vector_size=vector_size,
+            distance=distance,
+            hybrid=hybrid,
+        ),
         ssl_context=ssl_context,
     )
     if status not in {200}:
@@ -208,6 +237,15 @@ def parse_args() -> argparse.Namespace:
         help=f"Vector distance metric. Defaults to {DEFAULT_DISTANCE}.",
     )
     parser.add_argument(
+        "--hybrid",
+        action="store_true",
+        help=(
+            f"Create named vectors '{DENSE_VECTOR_NAME}' (dense) and '{SPARSE_VECTOR_NAME}' "
+            "(sparse BM25, idf modifier) plus a concept_ids index. Without it the legacy "
+            "single-vector layout is created."
+        ),
+    )
+    parser.add_argument(
         "--recreate",
         action="store_true",
         help="Delete and recreate the collection before creating indexes.",
@@ -271,12 +309,13 @@ def main() -> int:
                 api_key=qdrant_api_key,
                 vector_size=args.vector_size,
                 distance=args.distance,
+                hybrid=args.hybrid,
                 ssl_context=ssl_context,
             )
         else:
             print(f"Collection already exists: {args.collection}")
 
-        for index in DEFAULT_INDEXES:
+        for index in indexes_for(hybrid=args.hybrid):
             print(f"Creating payload index: {index.field_name} ({index.field_schema})")
             create_payload_index(
                 base_url=qdrant_url,
