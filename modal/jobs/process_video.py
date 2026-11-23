@@ -14,6 +14,7 @@ from lib.constants import (
     VIDEO_TRANSCRIPTS_PREFIX,
 )
 from lib.embeddings import encode_documents
+from lib.vectors import build_point_vectors, collection_is_hybrid
 from lib.transcription import transcribe_media
 
 
@@ -135,9 +136,15 @@ def process_video_impl(
             [chunk["text"] for chunk in transcript_chunks],
             title=title,
         )
+        collection_name = get_collection_name()
+        point_vectors = build_point_vectors(
+            embeddings,
+            [chunk["text"] for chunk in transcript_chunks],
+            hybrid=collection_is_hybrid(qdrant, collection_name),
+        )
         points: List[PointStruct] = []
 
-        for chunk_index, (chunk, embedding) in enumerate(zip(transcript_chunks, embeddings)):
+        for chunk_index, (chunk, embedding) in enumerate(zip(transcript_chunks, point_vectors)):
             payload: Dict[str, Any] = {
                 "class_id": class_id,
                 "content_type": "video",
@@ -170,7 +177,7 @@ def process_video_impl(
 
         try:
             qdrant.create_collection(
-                collection_name=get_collection_name(),
+                collection_name=collection_name,
                 vectors_config=VectorParams(
                     size=EMBEDDING_VECTOR_SIZE,
                     distance=Distance.COSINE,
@@ -180,7 +187,7 @@ def process_video_impl(
             pass
 
         qdrant.delete(
-            collection_name=get_collection_name(),
+            collection_name=collection_name,
             points_selector=Filter(
                 must=[
                     FieldCondition(key="class_id", match=MatchValue(value=class_id)),
@@ -192,7 +199,7 @@ def process_video_impl(
         )
 
         qdrant.upsert(
-            collection_name=get_collection_name(),
+            collection_name=collection_name,
             points=points,
             wait=True,
         )
@@ -206,7 +213,7 @@ def process_video_impl(
 
         return {
             "success": True,
-            "collection_name": get_collection_name(),
+            "collection_name": collection_name,
             "content_type": "video",
             "recording_id": recording_id,
             "class_id": class_id,
