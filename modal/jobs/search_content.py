@@ -78,6 +78,8 @@ def format_hit(score: float, payload: Dict[str, Any] | None) -> Dict[str, Any]:
         "endSeconds": payload.get("end_seconds"),
         "transcriptChunkIndex": payload.get("transcript_chunk_index"),
         "transcriptLanguage": payload.get("transcript_language"),
+        # Set by modal/jobs/tag_concepts.py; [] for chunks that were never tagged.
+        "conceptIds": [str(concept_id) for concept_id in payload.get("concept_ids") or []],
     }
 
 
