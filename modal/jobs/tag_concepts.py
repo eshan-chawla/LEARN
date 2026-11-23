@@ -2,7 +2,10 @@
 """Write payload.concept_ids on every chunk of a Qdrant collection.
 
     python modal/jobs/tag_concepts.py --collection class_content_embeddings_hybrid_dev \\
-        --graph data/concept_graph/dl_course.json [--class-id <uuid>] [--dry-run]
+        --graph data/concept_graph/dl_course.json [--class-id <uuid>] [--llm] [--dry-run]
+
+With --llm, chunks with 0 or more than 4 keyword matches get one Gemini Flash-Lite JSON call
+(needs GEMINI_API_KEY) that picks up to 3 concept ids from the graph.
 
 Runs locally (not on Modal) with QDRANT_URL / QDRANT_API_KEY from the environment or
 qdrant/.env. Chunks with the same concept set are written in one set_payload call.
@@ -23,7 +26,14 @@ REPO_DIR = MODAL_DIR.parent
 if str(MODAL_DIR) not in sys.path:
     sys.path.insert(0, str(MODAL_DIR))
 
-from lib.concept_tagging import build_matchers, keyword_tag, needs_llm_pass  # noqa: E402
+from lib.concept_tagging import (  # noqa: E402
+    LLM_TAGGING_MODEL,
+    build_matchers,
+    choose_concepts_with_llm,
+    keyword_tag,
+    make_gemini_complete,
+    needs_llm_pass,
+)
 
 # (chunk text, keyword matches) -> concept ids. Returning None keeps the keyword result.
 Refiner = Callable[[str, List[str]], List[str] | None]
@@ -136,6 +146,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--graph", default=str(REPO_DIR / "data" / "concept_graph" / "dl_course.json"))
     parser.add_argument("--class-id", default=None, help="Only tag chunks of this class.")
     parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--llm", action="store_true", help="Refine 0 / >4-match chunks with Gemini.")
+    parser.add_argument("--llm-model", default=LLM_TAGGING_MODEL)
     parser.add_argument("--dry-run", action="store_true", help="Tag and report, but write nothing.")
     parser.add_argument("--env-file", default=str(REPO_DIR / "qdrant" / ".env"))
     return parser.parse_args()
@@ -154,11 +166,23 @@ def main() -> int:
 
     client = QdrantClient(url=url, api_key=os.environ.get("QDRANT_API_KEY") or None, timeout=60)
     concepts = load_concepts(Path(args.graph))
+
+    refine: Refiner | None = None
+    if args.llm:
+        if not os.environ.get("GEMINI_API_KEY"):
+            print("--llm needs GEMINI_API_KEY.", file=sys.stderr)
+            return 1
+        complete = make_gemini_complete(args.llm_model)
+
+        def refine(text: str, keyword_ids: List[str]) -> List[str] | None:
+            return choose_concepts_with_llm(text, keyword_ids, concepts, complete)
+
     totals = tag_collection(
         client,
         collection=args.collection,
         concepts=concepts,
         class_id=args.class_id,
+        refine=refine,
         batch_size=args.batch_size,
         dry_run=args.dry_run,
     )
