@@ -1,0 +1,104 @@
+{
+  "id": "p02-dropout-overfitting-gap",
+  "author": "joao",
+  "target_concept": "dropout",
+  "description": "Knows how MLPs are built and trained but has no idea what overfitting is, so dropout looks pointless; also thinks dropout stays on at inference.",
+  "hidden_state": {
+    "known": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"],
+    "gaps": ["overfitting_regularization"],
+    "misconceptions": ["dropout.M1"]
+  },
+  "turns": [
+    {
+      "kind": "opening",
+      "script": "Why do we randomly turn off neurons with dropout? Doesn't that just make the network worse?",
+      "gold": {
+        "gap": "overfitting_regularization",
+        "active_misconceptions": ["dropout.M1"],
+        "acceptable_actions": ["probe_prerequisite:overfitting_regularization", "remediate_prerequisite:overfitting_regularization"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "overfitting_regularization",
+        "active_misconceptions": ["dropout.M1"],
+        "acceptable_actions": ["remediate_prerequisite:overfitting_regularization", "probe_prerequisite:overfitting_regularization"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "overfitting_regularization",
+        "active_misconceptions": ["dropout.M1"],
+        "acceptable_actions": ["remediate_prerequisite:overfitting_regularization", "formative_question:overfitting_regularization", "formative_question:dropout"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "respond",
+      "script": "Okay. So when I deploy the model, it keeps dropping half the neurons at random, right?",
+      "gold": {
+        "gap": "overfitting_regularization",
+        "active_misconceptions": ["dropout.M1"],
+        "acceptable_actions": ["remediate_misconception:dropout.M1"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "distractor",
+      "script": "Quick question: can we use PyTorch instead of TensorFlow for the project?",
+      "gold": {
+        "acceptable_actions": ["answer"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "overfitting_regularization",
+        "active_misconceptions": ["dropout.M1"],
+        "acceptable_actions": ["remediate_misconception:dropout.M1", "formative_question:dropout", "hint:dropout"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "distractor",
+      "script": "What time are office hours this week?",
+      "gold": {
+        "acceptable_actions": ["answer"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "respond",
+      "script": "Back to dropout: at test time the network still drops units, so its predictions are a bit random?",
+      "gold": {
+        "gap": "overfitting_regularization",
+        "active_misconceptions": ["dropout.M1"],
+        "acceptable_actions": ["remediate_misconception:dropout.M1"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "overfitting_regularization",
+        "active_misconceptions": ["dropout.M1"],
+        "acceptable_actions": ["remediate_misconception:dropout.M1", "formative_question:dropout", "hint:dropout"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "overfitting_regularization",
+        "active_misconceptions": ["dropout.M1"],
+        "acceptable_actions": ["formative_question:dropout", "hint:dropout", "remediate_misconception:dropout.M1", "remediate_prerequisite:overfitting_regularization"],
+        "do_not_remediate": ["derivatives", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp"]
+      }
+    }
+  ]
+}
