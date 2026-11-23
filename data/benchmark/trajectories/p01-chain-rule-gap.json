@@ -1,0 +1,104 @@
+{
+  "id": "p01-chain-rule-gap",
+  "author": "joao",
+  "target_concept": "backprop",
+  "description": "Comfortable with the forward pass, MLPs and gradient descent, but never learned the chain rule, and believes gradients flow forward.",
+  "hidden_state": {
+    "known": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"],
+    "gaps": ["chain_rule"],
+    "misconceptions": ["backprop.M1"]
+  },
+  "turns": [
+    {
+      "kind": "opening",
+      "script": "I don't get why we multiply all these gradients in backprop.",
+      "gold": {
+        "gap": "chain_rule",
+        "active_misconceptions": ["backprop.M1"],
+        "acceptable_actions": ["probe_prerequisite:chain_rule", "remediate_misconception:backprop.M1"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "chain_rule",
+        "active_misconceptions": ["backprop.M1"],
+        "acceptable_actions": ["remediate_prerequisite:chain_rule", "probe_prerequisite:chain_rule", "remediate_misconception:backprop.M1"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "chain_rule",
+        "active_misconceptions": ["backprop.M1"],
+        "acceptable_actions": ["remediate_prerequisite:chain_rule", "remediate_misconception:backprop.M1", "formative_question:chain_rule"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "distractor",
+      "script": "Unrelated: when is the midterm?",
+      "gold": {
+        "acceptable_actions": ["answer"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "respond",
+      "script": "Okay, back to backprop. Which direction do the gradients actually go?",
+      "gold": {
+        "gap": "chain_rule",
+        "active_misconceptions": ["backprop.M1"],
+        "acceptable_actions": ["remediate_misconception:backprop.M1", "formative_question:backprop", "hint:backprop"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "chain_rule",
+        "active_misconceptions": ["backprop.M1"],
+        "acceptable_actions": ["remediate_misconception:backprop.M1", "remediate_prerequisite:chain_rule", "hint:backprop"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "distractor",
+      "script": "Is homework 3 due Friday or Monday?",
+      "gold": {
+        "acceptable_actions": ["answer"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "respond",
+      "script": "Sorry, where were we? So in backprop we compute the gradients starting from the input, right?",
+      "gold": {
+        "gap": "chain_rule",
+        "active_misconceptions": ["backprop.M1"],
+        "acceptable_actions": ["remediate_misconception:backprop.M1"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "chain_rule",
+        "active_misconceptions": ["backprop.M1"],
+        "acceptable_actions": ["remediate_misconception:backprop.M1", "formative_question:backprop", "hint:backprop"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    },
+    {
+      "kind": "respond",
+      "gold": {
+        "gap": "chain_rule",
+        "active_misconceptions": ["backprop.M1"],
+        "acceptable_actions": ["formative_question:backprop", "hint:backprop", "remediate_misconception:backprop.M1", "remediate_prerequisite:chain_rule"],
+        "do_not_remediate": ["derivatives", "partial_derivatives", "dot_product", "matrix_multiplication", "gradient_descent", "loss_functions", "activation_functions", "perceptron", "mlp", "computational_graph"]
+      }
+    }
+  ]
+}

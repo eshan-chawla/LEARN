@@ -10,6 +10,7 @@
     "test": "vitest run",
     "graph:build": "tsx scripts/build-concept-graph.ts",
     "eval:single": "tsx --env-file=.env.local eval/run-single-turn.ts",
+    "eval:traj": "tsx --env-file=.env.local eval/run-trajectories.ts",
     "graph:seed": "tsx --env-file=.env.local scripts/seed-concept-graph.ts"
   },
   "dependencies": {
