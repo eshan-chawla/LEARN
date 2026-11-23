@@ -203,6 +203,11 @@ async function main() {
           console.log(`${MEMORY_CONDITIONS[memory]} ${persona.id} t${row.turn} (${row.kind}): ${action}${row.retrievalFailed ? ' [retrieval failed]' : ''}`);
         },
       });
+      // One failed turn is an outage worth logging; a trajectory with no successful turn means a
+      // broken setup (missing key, wrong model), so stop instead of writing a file of errors.
+      if (rows.length > 0 && rows.every((row) => row.error)) {
+        throw new Error(`Every turn of ${persona.id} (${MEMORY_CONDITIONS[memory]}) failed: ${rows[0].error}. Aborting; see ${outPath}`);
+      }
       console.log(`${MEMORY_CONDITIONS[memory]} ${persona.id}: ${rows.length} turns`);
     }
   }
