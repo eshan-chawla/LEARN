@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 from lib.chunking import extract_page_chunks
 from lib.constants import (
     EMBEDDING_VECTOR_SIZE,
-    SHARED_COLLECTION_NAME,
+    get_collection_name,
 )
 from lib.embeddings import encode_documents
 
@@ -121,7 +121,7 @@ def process_pdf_impl(
 
         try:
             qdrant.create_collection(
-                collection_name=SHARED_COLLECTION_NAME,
+                collection_name=get_collection_name(),
                 vectors_config=VectorParams(
                     size=EMBEDDING_VECTOR_SIZE,
                     distance=Distance.COSINE,
@@ -131,7 +131,7 @@ def process_pdf_impl(
             pass
 
         qdrant.delete(
-            collection_name=SHARED_COLLECTION_NAME,
+            collection_name=get_collection_name(),
             points_selector=Filter(
                 must=[
                     FieldCondition(key="class_id", match=MatchValue(value=class_id)),
@@ -143,7 +143,7 @@ def process_pdf_impl(
         )
 
         qdrant.upsert(
-            collection_name=SHARED_COLLECTION_NAME,
+            collection_name=get_collection_name(),
             points=points,
             wait=True,
         )
@@ -158,7 +158,7 @@ def process_pdf_impl(
 
         return {
             "success": True,
-            "collection_name": SHARED_COLLECTION_NAME,
+            "collection_name": get_collection_name(),
             "content_type": "pdf",
             "book_id": book_id,
             "class_id": class_id,

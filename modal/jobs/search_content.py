@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Sequence
 
-from lib.constants import SHARED_COLLECTION_NAME
+from lib.constants import get_collection_name
 from lib.embeddings import encode_query
 
 
@@ -49,7 +49,7 @@ def search_content_impl(
         must_conditions.append(source_id_filter)
 
     hits = qdrant.search(
-        collection_name=SHARED_COLLECTION_NAME,
+        collection_name=get_collection_name(),
         query_vector=encode_query(query),
         query_filter=Filter(must=must_conditions),
         limit=limit,
